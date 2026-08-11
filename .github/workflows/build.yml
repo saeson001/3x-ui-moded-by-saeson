@@ -51,6 +51,8 @@ jobs:
           cp internal/clash_link/*.go /tmp/saeson-mod/internal/clash_link/ 2>/dev/null || true
           cp scripts/inject_reality_fix.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_clash_link.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
+          # Save our custom x-ui.sh (with Clash Link info in option 4)
+          cp x-ui.sh /tmp/saeson-mod/ 2>/dev/null || true
           
           # Copy upstream source to build root
           cp -a upstream-src/. .
@@ -64,6 +66,15 @@ jobs:
           mkdir -p scripts
           cp /tmp/saeson-mod/scripts/inject_reality_fix.py scripts/
           cp /tmp/saeson-mod/scripts/inject_clash_link.py scripts/
+          # Restore custom x-ui.sh
+          cp /tmp/saeson-mod/x-ui.sh . 2>/dev/null || true
+          
+          # Apply frontend patches (Clash subscription in QR modal)
+          if [ -d frontend-patches ]; then
+            cp -f frontend-patches/pages/inbounds/qr/QrCodeModal.tsx frontend/src/pages/inbounds/qr/QrCodeModal.tsx
+            cp -f frontend-patches/pages/clients/ClientQrModal.tsx frontend/src/pages/clients/ClientQrModal.tsx
+            echo "Frontend patches applied (Clash subscription in QR modal)"
+          fi
           
           echo "Build directory prepared with clash_link module"
 
@@ -138,11 +149,12 @@ jobs:
           XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
           echo "Xray version: ${XRAY_VER}"
           
-          # Download and extract xray binary
+          # Download and extract xray binary + geo data files
           curl -fSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${XRAY_ARCH}.zip" -o xray.zip
-          unzip -o xray.zip xray
+          unzip -o xray.zip xray geoip.dat geosite.dat
           chmod +x xray
-          echo "Xray-core downloaded successfully"
+          ls -lh xray geoip.dat geosite.dat
+          echo "Xray-core + geo data downloaded successfully"
         continue-on-error: false
 
       - name: Package release
@@ -155,13 +167,17 @@ jobs:
           # Copy xray-core
           if [ -f xray ]; then
             cp xray "release/x-ui/bin/xray-linux-${{ matrix.goarch }}"
+            # Copy geo data files (required for xray routing)
+            cp geoip.dat release/x-ui/bin/ 2>/dev/null || echo "WARNING: geoip.dat not found"
+            cp geosite.dat release/x-ui/bin/ 2>/dev/null || echo "WARNING: geosite.dat not found"
           else
             echo "WARNING: xray binary not found, skipping"
           fi
           
           # Copy management scripts and service files
-          cp scripts/x-ui.sh release/x-ui/
-          cp x-ui.sh release/x-ui/x-ui-upstream.sh 2>/dev/null || true
+          cp scripts/x-ui.sh release/x-ui/x-ui-upstream.sh 2>/dev/null || true
+          # Use our custom x-ui.sh (with Clash Link info in option 4)
+          cp x-ui.sh release/x-ui/x-ui.sh
           
           # Copy service files if they exist
           for f in x-ui.service.* x-ui.rc; do
@@ -228,6 +244,10 @@ jobs:
             - **多节点聚合**: 将多个 3x-ui 入站合并到一个 Clash 配置文件中
             - **Token URL**: 生成固定链接，可直接粘贴到 Clash Party 作为订阅地址
             - **配置备份导出**: 一键导出所有入站、客户端、Host 等设置到 JSON 文件
+
+            ### 增强 (v1.2.2)
+            - **x-ui 命令选项 4 增强**: 现在显示服务器 IP、面板 URL、账号密码、Clash Link API 端点等完整信息，无需再手动翻找
+            - **chmod 修复**: 安装脚本增加 x-ui.sh 可执行权限设置
 
             ### API 端点
             - `POST /panel/api/clash-link/generate` — 生成 Clash 配置链接

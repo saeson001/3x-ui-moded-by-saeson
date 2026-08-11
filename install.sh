@@ -23,7 +23,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.2.0"
+MOD_VERSION="v1.2.3"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -192,6 +192,30 @@ install_xui() {
     rm -rf ${xui_folder}/
     mkdir -p ${xui_folder}/bin
     cp -rf x-ui/* ${xui_folder}/
+
+    # 检查并下载缺失的 geo 数据文件（xray-core 路由必需）
+    if [[ ! -f ${xui_folder}/bin/geoip.dat ]] || [[ ! -f ${xui_folder}/bin/geosite.dat ]]; then
+        echo -e "${yellow}下载 xray-core geo 数据文件...${plain}"
+        local XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        if [[ -n "${XRAY_VER}" ]]; then
+            # Download and extract just the dat files
+            local geo_zip="${temp_dir}/xray-geo.zip"
+            local xray_arch_flag="64"
+            [[ "${XUI_ARCH}" == "arm64" ]] && xray_arch_flag="arm64-v8a"
+            [[ "${XUI_ARCH}" == "armv7" ]] && xray_arch_flag="armv7a"
+            curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${xray_arch_flag}.zip" -o "${geo_zip}" 2>/dev/null
+            if [[ -f "${geo_zip}" ]]; then
+                unzip -o "${geo_zip}" geoip.dat geosite.dat -d "${xui_folder}/bin/" 2>/dev/null || true
+                rm -f "${geo_zip}"
+            fi
+        fi
+        # Verify
+        if [[ -f ${xui_folder}/bin/geoip.dat ]] && [[ -f ${xui_folder}/bin/geosite.dat ]]; then
+            echo -e "${green}xray-core geo 数据文件已就绪${plain}"
+        else
+            echo -e "${red}警告: geoip.dat/geosite.dat 下载失败，xray 可能无法正常启动${plain}"
+        fi
+    fi
 
     # 恢复数据
     if [[ -f ${temp_dir}/config.json.bak ]]; then
@@ -475,8 +499,195 @@ FIXEOF
     echo -e "${green}修复脚本位置: ${xui_folder}/fix-reality.sh${plain}"
 }
 
-# --- 主流程 ---
-main() {
+# --- 检查是否已安装 ---
+installed_xui_version() {
+    if [[ -x "${xui_folder}/x-ui" ]]; then
+        ${xui_folder}/x-ui -v 2>/dev/null || echo "unknown"
+    else
+        echo ""
+    fi
+}
+
+# --- 卸载 ---
+do_uninstall() {
+    echo -e "${blue}==================== 卸载 3x-ui ====================${plain}"
+    echo ""
+    
+    if [[ ! -x "${xui_folder}/x-ui" ]]; then
+        echo -e "${red}3x-ui 未安装，无需卸载。${plain}"
+        return 1
+    fi
+    
+    echo -e "${yellow}以下操作将完全删除 3x-ui 面板及其数据：${plain}"
+    echo -e "  - 面板程序: ${xui_folder}"
+    echo -e "  - 数据库: /etc/x-ui/x-ui.db"
+    echo -e "  - 配置文件: /etc/x-ui/"
+    echo ""
+    read -rp "确认卸载? [y/N]: " confirm
+    if [[ "${confirm}" != "y" && "${confirm}" != "Y" ]]; then
+        echo -e "${green}已取消卸载。${plain}"
+        return 0
+    fi
+    
+    echo -e "${green}正在卸载 3x-ui...${plain}"
+    systemctl stop x-ui 2>/dev/null || true
+    systemctl disable x-ui 2>/dev/null || true
+    rm -f /etc/systemd/system/x-ui.service
+    rm -f /usr/bin/x-ui
+    rm -rf "${xui_folder}"
+    rm -rf /etc/x-ui
+    systemctl daemon-reload 2>/dev/null || true
+    
+    echo -e "${green}3x-ui 已卸载完成。${plain}"
+}
+
+# --- 更新 ---
+do_update() {
+    echo -e "${blue}==================== 更新 3x-ui ====================${plain}"
+    echo ""
+    
+    if [[ ! -x "${xui_folder}/x-ui" ]]; then
+        echo -e "${red}3x-ui 未安装，请先安装。${plain}"
+        echo -e "${yellow}提示: 选择选项 1 进行安装。${plain}"
+        return 1
+    fi
+    
+    local current_version=$(installed_xui_version)
+    local latest_version=$(get_latest_version)
+    echo -e "${green}当前版本: ${current_version:-unknown}${plain}"
+    echo -e "${green}最新版本: ${latest_version}${plain}"
+    
+    if [[ "${current_version}" == "${latest_version}" ]]; then
+        echo -e "${yellow}已经是最新版本，无需更新。${plain}"
+        read -rp "是否强制重新安装? [y/N]: " force
+        if [[ "${force}" != "y" && "${force}" != "Y" ]]; then
+            return 0
+        fi
+    fi
+    
+    # 备份数据
+    local temp_dir=$(mktemp -d)
+    echo -e "${green}备份现有数据...${plain}"
+    if [[ -f ${xui_folder}/bin/config.json ]]; then
+        cp ${xui_folder}/bin/config.json ${temp_dir}/config.json.bak
+    fi
+    if [[ -f /etc/x-ui/x-ui.db ]]; then
+        cp /etc/x-ui/x-ui.db ${temp_dir}/x-ui.db.bak
+    fi
+    if [[ -f /etc/x-ui/x-ui.db-shm ]]; then
+        cp /etc/x-ui/x-ui.db-shm ${temp_dir}/x-ui.db-shm.bak 2>/dev/null || true
+    fi
+    if [[ -f /etc/x-ui/x-ui.db-wal ]]; then
+        cp /etc/x-ui/x-ui.db-wal ${temp_dir}/x-ui.db-wal.bak 2>/dev/null || true
+    fi
+    
+    # 停止服务
+    systemctl stop x-ui 2>/dev/null || rc-service x-ui stop 2>/dev/null || true
+    
+    # 下载并安装新版本
+    install_xui "${latest_version}"
+    
+    # 恢复数据
+    if [[ -f ${temp_dir}/config.json.bak ]]; then
+        cp ${temp_dir}/config.json.bak ${xui_folder}/bin/config.json
+    fi
+    if [[ -f ${temp_dir}/x-ui.db.bak ]]; then
+        mkdir -p /etc/x-ui
+        cp ${temp_dir}/x-ui.db.bak /etc/x-ui/x-ui.db
+    fi
+    if [[ -f ${temp_dir}/x-ui.db-shm.bak ]]; then
+        cp ${temp_dir}/x-ui.db-shm.bak /etc/x-ui/x-ui.db-shm 2>/dev/null || true
+    fi
+    if [[ -f ${temp_dir}/x-ui.db-wal.bak ]]; then
+        cp ${temp_dir}/x-ui.db-wal.bak /etc/x-ui/x-ui.db-wal 2>/dev/null || true
+    fi
+    
+    # 安装管理命令
+    cp -f ${xui_folder}/x-ui.sh /usr/bin/x-ui 2>/dev/null || true
+    chmod +x /usr/bin/x-ui 2>/dev/null || true
+    
+    # 重启服务
+    systemctl restart x-ui 2>/dev/null || rc-service x-ui restart 2>/dev/null || true
+    sleep 2
+    
+    rm -rf "${temp_dir}"
+    
+    echo -e "${green}3x-ui 已更新到 ${latest_version}！${plain}"
+    echo -e "${yellow}提示: 使用 x-ui 命令打开管理菜单查看状态。${plain}"
+}
+
+# --- 查看版本 ---
+do_check_version() {
+    echo -e "${blue}==================== 版本信息 ====================${plain}"
+    echo ""
+    
+    local current_version=$(installed_xui_version)
+    local latest_version=$(get_latest_version)
+    
+    echo -e "  当前安装版本: ${green}${current_version:-未安装}${plain}"
+    echo -e "  最新可用版本: ${green}${latest_version}${plain}"
+    echo -e "  脚本版本:     ${green}${MOD_VERSION}${plain}"
+    echo -e "  仓库:         ${green}${REPO_OWNER}/${REPO_NAME}${plain}"
+    echo ""
+    
+    if [[ -n "${current_version}" && "${current_version}" != "${latest_version}" ]]; then
+        echo -e "${yellow}发现新版本，建议运行更新。${plain}"
+    elif [[ -n "${current_version}" ]]; then
+        echo -e "${green}当前已是最新版本。${plain}"
+    fi
+}
+
+# --- 交互菜单 ---
+show_install_menu() {
+    echo ""
+    echo -e "${blue}================================================${plain}"
+    echo -e "${blue}   3x-ui moded by saeson 一键管理脚本 ${MOD_VERSION}${plain}"
+    echo -e "${blue}================================================${plain}"
+    echo -e ""
+    echo -e "  ${green}1.${plain} 安装 3x-ui"
+    echo -e "  ${green}2.${plain} 更新 3x-ui"
+    echo -e "  ${green}3.${plain} 查看版本"
+    echo -e "  ${green}4.${plain} 卸载 3x-ui"
+    echo -e "  ${green}0.${plain} 退出"
+    echo -e ""
+    echo -e "${blue}================================================${plain}"
+    echo ""
+    
+    read -rp "请选择操作 [0-4]: " choice
+    case "${choice}" in
+        1)
+            if [[ -x "${xui_folder}/x-ui" ]]; then
+                echo -e "${yellow}3x-ui 已安装，当前版本: $(installed_xui_version)${plain}"
+                read -rp "是否重新安装? (将保留数据) [y/N]: " reinstall
+                if [[ "${reinstall}" != "y" && "${reinstall}" != "Y" ]]; then
+                    show_install_menu
+                    return
+                fi
+            fi
+            do_install
+            ;;
+        2)
+            do_update
+            ;;
+        3)
+            do_check_version
+            ;;
+        4)
+            do_uninstall
+            ;;
+        0)
+            echo -e "${green}再见！${plain}"
+            exit 0
+            ;;
+        *)
+            echo -e "${red}无效选择，请重新输入。${plain}"
+            show_install_menu
+            ;;
+    esac
+}
+
+# --- 主安装流程 ---
+do_install() {
     echo ""
     echo -e "${blue}==================== 开始安装 ====================${plain}"
     echo ""
@@ -510,7 +721,27 @@ main() {
     echo -e "${yellow}提示: 如需 SSL 证书，请运行 x-ui 后选择 SSL 证书管理选项。${plain}"
 }
 
-# 如果指定版本参数
-VERSION_ARG="${1:-}"
-
-main "${VERSION_ARG}"
+# --- 入口 ---
+if [[ $# -gt 0 ]]; then
+    case "$1" in
+        install|i)
+            do_install "${2:-}"
+            ;;
+        update|u)
+            do_update
+            ;;
+        version|v)
+            do_check_version
+            ;;
+        uninstall|remove)
+            do_uninstall
+            ;;
+        *)
+            echo -e "${red}未知参数: $1${plain}"
+            echo -e "用法: $0 [install|update|version|uninstall]"
+            exit 1
+            ;;
+    esac
+else
+    show_install_menu
+fi

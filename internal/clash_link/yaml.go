@@ -210,7 +210,7 @@ func buildProxiesFromInbound(inbound model.Inbound) ([]ProxyEntry, error) {
 			return nil, err
 		}
 		entries = proxies
-	case model.VMess:
+	case model.VMESS:
 		proxies, err := buildVMessProxies(inbound, streamSettings, network, server, port, externalProxies)
 		if err != nil {
 			return nil, err

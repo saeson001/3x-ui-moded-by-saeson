@@ -138,21 +138,35 @@ def copy_clash_link_module(project_root, upstream_dir):
         print(f"Warning: {src_dir} not found. Skipping clash_link copy.")
         return False
 
-    os.makedirs(dst_dir, exist_ok=True)
-
-    for f in os.listdir(src_dir):
-        if f.endswith('.go'):
-            src = os.path.join(src_dir, f)
-            dst = os.path.join(dst_dir, f)
-            shutil.copy2(src, dst)
-            print(f"  Copied: {f}")
+    # Skip if source and destination are the same directory
+    src_abs = os.path.abspath(src_dir)
+    dst_abs = os.path.abspath(dst_dir)
+    if src_abs == dst_abs:
+        print(f"  Source and destination are the same ({src_abs}), skipping copy.")
+        for f in os.listdir(src_dir):
+            if f.endswith('.go'):
+                print(f"  Already present: {f}")
+    else:
+        os.makedirs(dst_dir, exist_ok=True)
+        for f in os.listdir(src_dir):
+            if f.endswith('.go'):
+                src = os.path.join(src_dir, f)
+                dst = os.path.join(dst_dir, f)
+                shutil.copy2(src, dst)
+                print(f"  Copied: {f}")
 
     # Also copy the route registration file
     routes_src = os.path.join(project_root, 'internal', 'web', 'controller', 'clash_link_routes.go')
     routes_dst = os.path.join(upstream_dir, 'internal', 'web', 'controller', 'clash_link_routes.go')
-    if os.path.exists(routes_src):
-        shutil.copy2(routes_src, routes_dst)
-        print(f"  Copied: clash_link_routes.go")
+    routes_src_abs = os.path.abspath(routes_src)
+    routes_dst_abs = os.path.abspath(routes_dst)
+    if routes_src_abs != routes_dst_abs:
+        if os.path.exists(routes_src):
+            shutil.copy2(routes_src, routes_dst)
+            print(f"  Copied: clash_link_routes.go")
+    else:
+        if os.path.exists(routes_src):
+            print(f"  Already present: clash_link_routes.go")
 
     return True
 
