@@ -72,9 +72,7 @@ def main():
 
     # Insert the preserveRealitySettings call right after the closing brace
     fix_call = f'{indent_str}// Fix: prevent External Proxy from clearing Reality settings\n'
-    fix_call += f'{indent_str}if err := s.preserveRealitySettings(tx, inbound); err != nil {{\n'
-    fix_call += f'{indent_str}\treturn err\n'
-    fix_call += f'{indent_str}}}\n'
+    fix_call += f'{indent_str}s.preserveRealitySettings(tx, inbound)\n'
 
     new_lines = lines[:end + 1] + ['\n'] + [fix_call, '\n'] + lines[end + 1:]
 
