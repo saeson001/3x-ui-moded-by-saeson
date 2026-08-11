@@ -11,6 +11,10 @@ on:
         required: true
         default: 'v3.4.2'
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
@@ -182,7 +186,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: false
+          merge-multiple: true
+
+      - name: Debug artifacts
+        run: |
+          echo "=== Artifact contents ==="
+          find artifacts -type f -ls
+          ls -la artifacts/
 
       - name: Collect release files
         run: |
@@ -198,22 +208,18 @@ jobs:
             ## 3x-ui moded by saeson ${{ github.ref_name }}
 
             ### 修复内容
-            - **External Proxy + REALITY Bug 修复**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 `publicKey` 和 `fingerprint` 被清空为 `null` 的问题
-            - **Go 源码级修复**: 在 `AddInbound` 中调用 `preserveRealitySettings` 从数据库恢复被清空的 Reality 参数
+            - **External Proxy + REALITY Bug 修复 (Go 源码级)**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 publicKey 和 fingerprint 被清空为 null 的问题
 
-            ### 影响范围
-            - 修复前: Clash Meta / Mihomo / Clash Party 通过 External Proxy 中转 Reality 流量时会报 "REALITY authentication failed"
-            - 修复后: Reality 参数完整保留，所有客户端均可正常连接
-
-            ### 与上游的差异
-            - 基于 MHSanaei/3x-ui
-            - 新增 `internal/web/service/reality_fix.go` — preserveRealitySettings 方法
-            - 修改 `internal/web/service/inbound.go` — 在 CreateHostsFromExternalProxy 后调用修复方法
+            ### 架构
+            - **linux-amd64**: 包含 Go 源码级修复的编译版二进制
+            - **其他架构 (arm64/armv7/...)** : 请使用一键安装脚本，将自动使用上游二进制 + 运行时修复方案
 
             ### 一键安装
             ```bash
             bash <(curl -fsSL https://raw.githubusercontent.com/saeson001/3x-ui-moded-by-saeson/main/install.sh)
             ```
-          files: release-files/*.tar.gz
+          files: |
+            release-files/*.tar.gz
           draft: false
           prerelease: false
+          fail_on_unmatched_files: false
