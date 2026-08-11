@@ -45,9 +45,12 @@ jobs:
       - name: Prepare build directory
         run: |
           # Save our custom files before copying upstream
-          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/scripts
+          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/internal/web/controller /tmp/saeson-mod/internal/clash_link /tmp/saeson-mod/scripts
           cp internal/web/service/reality_fix.go /tmp/saeson-mod/internal/web/service/ 2>/dev/null || true
+          cp internal/web/controller/clash_link_routes.go /tmp/saeson-mod/internal/web/controller/ 2>/dev/null || true
+          cp internal/clash_link/*.go /tmp/saeson-mod/internal/clash_link/ 2>/dev/null || true
           cp scripts/inject_reality_fix.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
+          cp scripts/inject_clash_link.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           
           # Copy upstream source to build root
           cp -a upstream-src/. .
@@ -55,10 +58,14 @@ jobs:
           
           # Restore our custom files
           cp /tmp/saeson-mod/internal/web/service/reality_fix.go internal/web/service/
+          cp /tmp/saeson-mod/internal/web/controller/clash_link_routes.go internal/web/controller/
+          mkdir -p internal/clash_link
+          cp /tmp/saeson-mod/internal/clash_link/*.go internal/clash_link/
           mkdir -p scripts
           cp /tmp/saeson-mod/scripts/inject_reality_fix.py scripts/
+          cp /tmp/saeson-mod/scripts/inject_clash_link.py scripts/
           
-          echo "Build directory prepared"
+          echo "Build directory prepared with clash_link module"
 
       - name: Copy Reality fix source file
         run: |
@@ -72,6 +79,11 @@ jobs:
       - name: Inject Reality fix into inbound.go
         run: |
           python3 scripts/inject_reality_fix.py internal/web/service/inbound.go
+
+      - name: Inject Clash Link module
+        run: |
+          python3 scripts/inject_clash_link.py . .
+          echo "Clash Link injection complete"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -210,8 +222,21 @@ jobs:
             ### 修复内容
             - **External Proxy + REALITY Bug 修复 (Go 源码级)**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 publicKey 和 fingerprint 被清空为 null 的问题
 
+            ### 新功能 (Clash Link 订阅)
+            - **一键生成 Clash Party 配置链接**: 从 3x-ui 入站节点直接生成 Clash Meta YAML 配置文件
+            - **VLESS+REALITY 完整兼容**: 正确输出 public-key、short-id、fingerprint、servername 等 REALITY 参数
+            - **多节点聚合**: 将多个 3x-ui 入站合并到一个 Clash 配置文件中
+            - **Token URL**: 生成固定链接，可直接粘贴到 Clash Party 作为订阅地址
+            - **配置备份导出**: 一键导出所有入站、客户端、Host 等设置到 JSON 文件
+
+            ### API 端点
+            - `POST /panel/api/clash-link/generate` — 生成 Clash 配置链接
+            - `GET /d/:token` — 获取 Clash YAML 配置（可直接粘贴到 Clash Party）
+            - `GET /panel/api/clash-link/backup` — 导出完整配置备份
+            - `GET /panel/api/clash-link/list` — 列出所有已生成的配置链接
+
             ### 架构
-            - **linux-amd64**: 包含 Go 源码级修复的编译版二进制
+            - **linux-amd64**: 包含所有修复和功能的完整编译版
             - **其他架构 (arm64/armv7/...)** : 请使用一键安装脚本，将自动使用上游二进制 + 运行时修复方案
 
             ### 一键安装

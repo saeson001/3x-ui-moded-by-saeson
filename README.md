@@ -2,9 +2,49 @@
 
 > 基于 [MHSanaei/3x-ui](https://github.com/MHSanaei/3x-ui) 最新版的增强分支
 
+## 新功能 (v1.2.0)
+
+### Clash Link — 一键生成 Clash Party 配置文件
+
+**功能：** 从 3x-ui 入站节点直接生成 Clash Meta / Clash Party 兼容的 YAML 配置文件链接。
+
+- **VLESS+REALITY 完整兼容** — 正确输出 `public-key`、`short-id`、`client-fingerprint`、`servername` 等 REALITY 参数
+- **多节点聚合** — 将多个入站合并到一个 Clash 配置
+- **Token 订阅链接** — 生成固定 URL（`/d/<token>`），可直接粘贴到 Clash Party 作为远程订阅
+- **配置备份导出** — 一键导出所有入站、客户端、Host 等设置到 JSON 文件
+- **兼容原版数据库** — 直接读取 3x-ui 的 SQLite 数据库，无需额外配置
+
+**使用方法：**
+
+```bash
+# API 方式生成（需先登录面板获取 session）
+curl -X POST http://<面板地址>/panel/api/clash-link/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inbound_ids": [],        # 空数组 = 全部启用的入站
+    "config_name": "我的节点",
+    "mixed_port": 7890,
+    "allow_lan": true,
+    "mode": "rule",
+    "log_level": "info",
+    "group_name": "节点选择"
+  }'
+
+# 返回：{"success":true, "full_url":"http://xxx/d/abcdef1234567890", "token":"...", "proxy_num":3}
+
+# 备份导出
+curl http://<面板地址>/panel/api/clash-link/backup > backup.json
+```
+
+**Clash Party 导入方法：**
+1. 在 3x-ui 面板中生成配置链接
+2. 复制返回的 `full_url`（如 `http://38.47.108.240:2053/d/abcdef1234567890`）
+3. 打开 Clash Party → Profiles → 粘贴 URL → 下载
+4. 切换到新 Profile 即可使用
+
 ## 修复内容
 
-### 1. External Proxy + REALITY Bug 修复 (v1.1.0 — Go 源码级)
+### External Proxy + REALITY Bug 修复 (v1.1.0 — Go 源码级)
 
 **问题描述：** 当 VLESS+REALITY 入站启用了 External Proxy（dokodemo-door 中转）时，3x-ui 在生成 xray 配置 (`config.json`) 时会清空 REALITY 安全参数（`publicKey` → `null`，`fingerprint` → `null`），导致：
 - v2rayN / Xray-core 客户端仍可连接（通过分享链接补充参数）

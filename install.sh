@@ -23,7 +23,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.1.0"
+MOD_VERSION="v1.2.0"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -206,6 +206,10 @@ install_xui() {
     cp -f ${xui_folder}/x-ui.sh /usr/bin/x-ui 2>/dev/null || true
     chmod +x /usr/bin/x-ui 2>/dev/null || true
 
+    # 创建 Clash Link 存储目录
+    mkdir -p /etc/x-ui/clash-configs
+    chmod 755 /etc/x-ui/clash-configs
+
     # 清理
     rm -rf "${temp_dir}"
 
@@ -309,6 +313,11 @@ configure_panel() {
     echo -e "    x-ui update   更新面板"
     echo -e "    x-ui uninstall 卸载面板"
     echo -e ""
+    echo -e "  Clash 订阅链接:"
+    echo -e "    面板 > Clash 配置 > 一键生成"
+    echo -e "    API: POST /panel/api/clash-link/generate"
+    echo -e "    备份: GET  /panel/api/clash-link/backup"
+    echo -e ""
 
     # 保存到文件
     local result_file="/etc/x-ui/install-result.env"
@@ -347,6 +356,7 @@ apply_reality_fix() {
     # 如果使用的是编译修复版，Go 源码已内置修复，无需运行时脚本
     if [[ ${USING_MODDED_BINARY} -eq 1 ]]; then
         echo -e "${green}External Proxy + REALITY 修复 (Go 源码级): 已内置在二进制中${plain}"
+        echo -e "${green}Clash Link 订阅功能: 已内置在二进制中${plain}"
         echo -e "${green}无需额外的运行时修复脚本。${plain}"
         return 0
     fi
