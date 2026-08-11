@@ -501,10 +501,14 @@ func applyRealitySettings(entry *ProxyEntry, realitySettings map[string]any) {
 	}
 	entry.TLS = true
 
-	// Extract serverName from serverNames array (upstream format)
-	if serverNames, ok := realitySettings["serverNames"].([]any); ok && len(serverNames) > 0 {
-		if s, ok := serverNames[0].(string); ok {
-			entry.ServerName = s
+	// Extract serverName from serverNames array - take first non-empty value
+	// (same empty-string guard as shortId)
+	if serverNames, ok := realitySettings["serverNames"].([]any); ok {
+		for _, sn := range serverNames {
+			if s, ok := sn.(string); ok && s != "" {
+				entry.ServerName = s
+				break
+			}
 		}
 	}
 	// Also try direct serverName field
@@ -527,10 +531,17 @@ func applyRealitySettings(entry *ProxyEntry, realitySettings map[string]any) {
 		realityOpts["public-key"] = pk
 	}
 
-	// shortId (from shortIds array or direct)
-	if shortIDs, ok := realitySettings["shortIds"].([]any); ok && len(shortIDs) > 0 {
-		if s, ok := shortIDs[0].(string); ok {
-			realityOpts["short-id"] = s
+	// shortId - take the first NON-EMPTY value from shortIds array.
+	// 3x-ui's shortIds array frequently contains empty strings (allowing
+	// no-shortId auth). Picking an empty string as short-id causes
+	// "REALITY authentication failed" in Clash/Mihomo. We must skip
+	// empties and use a real shortId that the server expects.
+	if shortIDs, ok := realitySettings["shortIds"].([]any); ok {
+		for _, sid := range shortIDs {
+			if s, ok := sid.(string); ok && s != "" {
+				realityOpts["short-id"] = s
+				break
+			}
 		}
 	}
 	if _, exists := realityOpts["short-id"]; !exists {
@@ -543,9 +554,12 @@ func applyRealitySettings(entry *ProxyEntry, realitySettings map[string]any) {
 		entry.RealityOpts = realityOpts
 	}
 
-	// fingerprint
+	// fingerprint - REALITY requires client-fingerprint; default to chrome
+	// if the database field is missing or empty.
 	if fp, ok := realityClientSettings["fingerprint"].(string); ok && fp != "" {
 		entry.ClientFingerprint = fp
+	} else {
+		entry.ClientFingerprint = "chrome"
 	}
 }
 
