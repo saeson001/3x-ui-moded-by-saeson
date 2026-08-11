@@ -23,7 +23,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.2.0"
+MOD_VERSION="v1.2.2"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -192,6 +192,30 @@ install_xui() {
     rm -rf ${xui_folder}/
     mkdir -p ${xui_folder}/bin
     cp -rf x-ui/* ${xui_folder}/
+
+    # 检查并下载缺失的 geo 数据文件（xray-core 路由必需）
+    if [[ ! -f ${xui_folder}/bin/geoip.dat ]] || [[ ! -f ${xui_folder}/bin/geosite.dat ]]; then
+        echo -e "${yellow}下载 xray-core geo 数据文件...${plain}"
+        local XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        if [[ -n "${XRAY_VER}" ]]; then
+            # Download and extract just the dat files
+            local geo_zip="${temp_dir}/xray-geo.zip"
+            local xray_arch_flag="64"
+            [[ "${XUI_ARCH}" == "arm64" ]] && xray_arch_flag="arm64-v8a"
+            [[ "${XUI_ARCH}" == "armv7" ]] && xray_arch_flag="armv7a"
+            curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${xray_arch_flag}.zip" -o "${geo_zip}" 2>/dev/null
+            if [[ -f "${geo_zip}" ]]; then
+                unzip -o "${geo_zip}" geoip.dat geosite.dat -d "${xui_folder}/bin/" 2>/dev/null || true
+                rm -f "${geo_zip}"
+            fi
+        fi
+        # Verify
+        if [[ -f ${xui_folder}/bin/geoip.dat ]] && [[ -f ${xui_folder}/bin/geosite.dat ]]; then
+            echo -e "${green}xray-core geo 数据文件已就绪${plain}"
+        else
+            echo -e "${red}警告: geoip.dat/geosite.dat 下载失败，xray 可能无法正常启动${plain}"
+        fi
+    fi
 
     # 恢复数据
     if [[ -f ${temp_dir}/config.json.bak ]]; then
