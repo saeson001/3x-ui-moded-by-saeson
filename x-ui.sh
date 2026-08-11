@@ -12,7 +12,7 @@ cyan='\033[0;36m'
 plain='\033[0m'
 
 xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
-MOD_VERSION="v1.0.0"
+MOD_VERSION="v1.1.0"
 REPO_OWNER="saeson001"
 REPO_NAME="3x-ui-moded-by-saeson"
 INSTALL_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/install.sh"

@@ -23,7 +23,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.0.0"
+MOD_VERSION="v1.1.0"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -139,6 +139,9 @@ get_latest_version() {
 }
 
 # --- 安装 3x-ui ---
+# 全局标志: 是否使用了我们自己的编译版（Go 源码级修复）
+USING_MODDED_BINARY=0
+
 install_xui() {
     local version="${1:-$(get_latest_version)}"
     echo -e "${green}安装 3x-ui ${version}...${plain}"
@@ -151,16 +154,19 @@ install_xui() {
     local pkg_url=""
     local download_success=0
 
-    # 优先从我们的 release 下载
+    # 优先从我们的编译版 release 下载（Go 源码级修复已内置）
     pkg_url="${GITHUB_RELEASES}/${version}/x-ui-linux-${XUI_ARCH}.tar.gz"
     if download_file "${temp_dir}/x-ui.tar.gz" "${pkg_url}"; then
         download_success=1
+        USING_MODDED_BINARY=1
+        echo -e "${green}使用编译修复版 (内置 Reality 修复)${plain}"
     fi
 
-    # 如果我们的 release 没有，从上游下载，然后打补丁
+    # 如果我们的 release 没有，从上游下载，安装后启用运行时修复
     if [[ ${download_success} -eq 0 ]]; then
         pkg_url="https://github.com/${UPSTREAM_REPO}/releases/latest/download/x-ui-linux-${XUI_ARCH}.tar.gz"
-        echo -e "${yellow}从上游下载二进制包...${plain}"
+        echo -e "${yellow}编译版暂未发布，从上游下载二进制包...${plain}"
+        echo -e "${yellow}(将使用运行时修复脚本作为替代方案)${plain}"
         if ! download_file "${temp_dir}/x-ui.tar.gz" "${pkg_url}"; then
             echo -e "${red}下载失败: ${pkg_url}${plain}"
             rm -rf "${temp_dir}"
@@ -196,9 +202,9 @@ install_xui() {
         cp ${temp_dir}/x-ui.db.bak /etc/x-ui/x-ui.db 2>/dev/null || true
     fi
 
-    # 安装管理命令
-    cp -f ${xui_folder}/x-ui.sh /usr/bin/x-ui
-    chmod +x /usr/bin/x-ui
+    # 安装管理命令（使用我们定制的 x-ui.sh）
+    cp -f ${xui_folder}/x-ui.sh /usr/bin/x-ui 2>/dev/null || true
+    chmod +x /usr/bin/x-ui 2>/dev/null || true
 
     # 清理
     rm -rf "${temp_dir}"
@@ -338,7 +344,14 @@ configure_firewall() {
 
 # --- 应用 externalProxy Reality 修复 ---
 apply_reality_fix() {
-    echo -e "${green}应用 External Proxy + REALITY 修复...${plain}"
+    # 如果使用的是编译修复版，Go 源码已内置修复，无需运行时脚本
+    if [[ ${USING_MODDED_BINARY} -eq 1 ]]; then
+        echo -e "${green}External Proxy + REALITY 修复 (Go 源码级): 已内置在二进制中${plain}"
+        echo -e "${green}无需额外的运行时修复脚本。${plain}"
+        return 0
+    fi
+
+    echo -e "${yellow}应用 External Proxy + REALITY 修复 (运行时脚本)...${plain}"
 
     # 创建修复脚本
     cat > ${xui_folder}/fix-reality.sh << 'FIXEOF'

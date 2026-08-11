@@ -4,15 +4,19 @@
 
 ## 修复内容
 
-### 1. External Proxy + REALITY Bug 修复
+### 1. External Proxy + REALITY Bug 修复 (v1.1.0 — Go 源码级)
 
 **问题描述：** 当 VLESS+REALITY 入站启用了 External Proxy（dokodemo-door 中转）时，3x-ui 在生成 xray 配置 (`config.json`) 时会清空 REALITY 安全参数（`publicKey` → `null`，`fingerprint` → `null`），导致：
 - v2rayN / Xray-core 客户端仍可连接（通过分享链接补充参数）
 - **Clash Meta / Mihomo / Clash Party 客户端无法连接**（报错 "REALITY authentication failed"）
 
-**根因：** 3x-ui 的 `internal/web/service/inbound.go` 在调用 `database.CreateHostsFromExternalProxy()` 后，`stream_settings` 的 `realitySettings.settings.publicKey` 和 `realitySettings.settings.fingerprint` 被错误地覆盖为空值。
+**根因：** 3x-ui 的 `AddInbound` 函数中，`database.CreateHostsFromExternalProxy()` 调用后 `stream_settings` 的 `realitySettings.settings.publicKey` 和 `realitySettings.settings.fingerprint` 被错误地覆盖为空值。
 
-**修复：** 在生成 xray 配置时，确保从数据库读取的完整 `realitySettings` 被原样保留，不被 External Proxy 配置覆盖。
+**修复 (v1.1.0)：** 
+- 新增 `internal/web/service/reality_fix.go` — `preserveRealitySettings` 方法
+- 在 `AddInbound` 的 `CreateHostsFromExternalProxy` 调用后，从数据库恢复被清空的 Reality 参数
+- **编译修复版**: 通过 GitHub Actions 重新编译 x-ui 二进制，内置修复逻辑
+- **降级方案**: 如果编译版暂未发布，自动使用运行时修复脚本 (`fix-reality-config.sh`)
 
 ### 2. 改进的安装脚本
 

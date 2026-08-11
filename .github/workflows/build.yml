@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       upstream_version:
-        description: '上游版本号 (如 v3.4.2)'
+        description: 'Upstream 3x-ui version (e.g. v3.4.2)'
         required: true
         default: 'v3.4.2'
 
@@ -16,37 +16,58 @@ jobs:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
-          # Linux
           - goos: linux
             goarch: amd64
+            xray_arch: 64
           - goos: linux
             goarch: arm64
+            xray_arch: arm64-v8a
           - goos: linux
             goarch: armv7
+            xray_arch: arm32-v7a
           - goos: linux
             goarch: armv6
+            xray_arch: arm32-v6a
           - goos: linux
             goarch: 386
+            xray_arch: 32
           - goos: linux
             goarch: s390x
-    
+            xray_arch: s390x
+
     steps:
-      - name: Checkout upstream
+      - name: Checkout modified source
+        uses: actions/checkout@v4
+
+      - name: Checkout upstream 3x-ui
         uses: actions/checkout@v4
         with:
           repository: MHSanaei/3x-ui
           ref: ${{ github.event.inputs.upstream_version || github.ref_name }}
-          path: upstream
+          path: upstream-src
 
-      - name: Apply patches
+      - name: Prepare build directory
         run: |
-          cp -r upstream/* .
-          # Apply our custom patches
-          if [ -f patches/fix-external-proxy-reality.patch ]; then
-            patch -p1 < patches/fix-external-proxy-reality.patch || true
+          # Copy upstream source to build root
+          cp -a upstream-src/. .
+          # Remove upstream checkout to avoid confusion
+          rm -rf upstream-src
+
+      - name: Copy Reality fix source file
+        run: |
+          # Our reality_fix.go is in internal/web/service/
+          if [ -f internal/web/service/reality_fix.go ]; then
+            echo "Reality fix source found, will inject calls..."
+          else
+            echo "WARNING: reality_fix.go not found in checkout"
           fi
+
+      - name: Inject Reality fix into inbound.go
+        run: |
+          python3 scripts/inject_reality_fix.py internal/web/service/inbound.go
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -65,35 +86,65 @@ jobs:
           npm run build
           cd ..
 
-      - name: Build Go binary
+      - name: Build Go binary (x-ui panel)
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
+          go mod tidy
           go build -ldflags="-s -w" -o x-ui .
+
+      - name: Download xray-core
+        run: |
+          XRAY_ARCH="${{ matrix.xray_arch }}"
+          # Get latest xray-core version
+          XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+          echo "Xray version: ${XRAY_VER}"
           
-          # Package
-          mkdir -p release/bin
-          cp x-ui release/bin/
+          # Download and extract xray binary
+          curl -fSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${XRAY_ARCH}.zip" -o xray.zip
+          unzip -o xray.zip xray
+          chmod +x xray
+          echo "Xray-core downloaded successfully"
+        continue-on-error: false
+
+      - name: Package release
+        run: |
+          mkdir -p release/x-ui/bin
           
-          # Copy xray binary
-          if [[ "${{ matrix.goos }}" == "linux" ]]; then
-            XRAY_ARCH="${{ matrix.goarch }}"
-            [[ "$XRAY_ARCH" == "armv7" ]] && XRAY_ARCH="armv7"
-            [[ "$XRAY_ARCH" == "armv6" ]] && XRAY_ARCH="armv6"
-            [[ "$XRAY_ARCH" == "386" ]] && XRAY_ARCH="386"
-            [[ "$XRAY_ARCH" == "s390x" ]] && XRAY_ARCH="s390x"
+          # Copy panel binary
+          cp x-ui release/x-ui/
+          
+          # Copy xray-core
+          if [ -f xray ]; then
+            cp xray "release/x-ui/bin/xray-linux-${{ matrix.goarch }}"
+          else
+            echo "WARNING: xray binary not found, skipping"
           fi
           
-          # Copy service files
-          cp x-ui.sh release/
-          cp x-ui.rc release/ 2>/dev/null || true
-          cp x-ui.service.* release/ 2>/dev/null || true
+          # Copy management scripts and service files
+          cp scripts/x-ui.sh release/x-ui/
+          cp x-ui.sh release/x-ui/x-ui-upstream.sh 2>/dev/null || true
+          
+          # Copy service files if they exist
+          for f in x-ui.service.* x-ui.rc; do
+            if [ -f "$f" ]; then
+              cp "$f" release/x-ui/
+            fi
+          done
+          
+          # Ensure executables
+          chmod +x release/x-ui/x-ui 2>/dev/null || true
+          chmod +x release/x-ui/bin/* 2>/dev/null || true
+          chmod +x release/x-ui/x-ui.sh 2>/dev/null || true
           
           cd release
           tar czf "../x-ui-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" .
           cd ..
+          
+          echo "Packaged: x-ui-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          ls -lh x-ui-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -107,10 +158,17 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: false
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+          find artifacts -name "*.tar.gz" -exec cp {} release-files/ \;
+          ls -lh release-files/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -118,19 +176,24 @@ jobs:
           name: "3x-ui moded by saeson ${{ github.ref_name }}"
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
-            
+
             ### 修复内容
-            - **External Proxy + REALITY Bug 修复**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 realitySettings 被清空的问题
-            
+            - **External Proxy + REALITY Bug 修复**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 `publicKey` 和 `fingerprint` 被清空为 `null` 的问题
+            - **Go 源码级修复**: 在 `AddInbound` 中调用 `preserveRealitySettings` 从数据库恢复被清空的 Reality 参数
+
+            ### 影响范围
+            - 修复前: Clash Meta / Mihomo / Clash Party 通过 External Proxy 中转 Reality 流量时会报 "REALITY authentication failed"
+            - 修复后: Reality 参数完整保留，所有客户端均可正常连接
+
             ### 与上游的差异
-            - 基于 MHSanaei/3x-ui 最新版
-            - 修复 externalProxy 导致 Reality 参数丢失的问题
-            - 改进的中文安装脚本
-            
-            ### 安装
+            - 基于 MHSanaei/3x-ui
+            - 新增 `internal/web/service/reality_fix.go` — preserveRealitySettings 方法
+            - 修改 `internal/web/service/inbound.go` — 在 CreateHostsFromExternalProxy 后调用修复方法
+
+            ### 一键安装
             ```bash
             bash <(curl -fsSL https://raw.githubusercontent.com/saeson001/3x-ui-moded-by-saeson/main/install.sh)
             ```
-          files: artifacts/*/x-ui-*.tar.gz
+          files: release-files/*.tar.gz
           draft: false
           prerelease: false
