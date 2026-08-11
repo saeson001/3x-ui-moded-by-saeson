@@ -1,0 +1,127 @@
+# External Proxy + REALITY Bug 修复
+#
+# 问题: 当 VLESS+REALITY 入站启用 externalProxy 时,
+#       3x-ui 在生成 xray config.json 时会清空 realitySettings
+#       (publicKey → null, fingerprint → null)
+#
+# 影响: Clash Meta / Mihomo / Clash Party 无法连接
+#       (报错: "REALITY authentication failed")
+#
+# v2rayN/Xray-core 不受影响因为它们可以通过分享链接补充参数
+#
+# 修复原理:
+#   当为 inbound 生成 xray 配置时，如果 security=reality 且
+#   realitySettings.settings.publicKey 为空，则从数据库的
+#   stream_settings 字段中读取完整配置并补全。
+
+--- a/internal/web/service/inbound.go
++++ b/internal/web/service/inbound.go
+@@ -1,6 +1,7 @@ package service
+ 
+ import (
++	"database/sql"
+ 	"encoding/json"
+ 	"fmt"
+ 	"net"
+@@ -xxx,6 +xxx,40 @@ func (s *InboundService) AddInbound(tx *gorm.DB, inbound *model.Inbound, inbound
+ 	// ... existing code ...
+ }
+ 
++// preserveRealitySettings 确保 REALITY 安全参数不被 externalProxy 清空
++// 
++// 当 inbound 启用了 externalProxy 时，3x-ui 可能会错误地清空
++// realitySettings 中的 publicKey 和 fingerprint 字段。
++// 此函数从数据库读取完整配置并修复。
++func (s *InboundService) preserveRealitySettings(tx *gorm.DB, inbound *model.Inbound) error {
++	if inbound.Protocol != model.VLESS {
++		return nil
++	}
++	
++	var ss map[string]interface{}
++	if err := json.Unmarshal([]byte(inbound.StreamSettings), &ss); err != nil {
++		return nil // 如果无法解析，跳过修复
++	}
++	
++	if security, _ := ss["security"].(string); security != "reality" {
++		return nil
++	}
++	
++	realitySettings, ok := ss["realitySettings"].(map[string]interface{})
++	if !ok {
++		return nil
++	}
++	
++	settings, ok := realitySettings["settings"].(map[string]interface{})
++	if !ok {
++		settings = make(map[string]interface{})
++		realitySettings["settings"] = settings
++	}
++	
++	// 检查 publicKey 是否为 nil 或空
++	pubKey, _ := settings["publicKey"].(string)
++	fingerprint, _ := settings["fingerprint"].(string)
++	
++	needFix := pubKey == "" || pubKey == "null" || fingerprint == "" || fingerprint == "null"
++	
++	if needFix {
++		// 从数据库读取原始 stream_settings
++		var rawSS string
++		err := tx.Raw("SELECT stream_settings FROM inbounds WHERE id = ?", inbound.Id).Scan(&rawSS).Error
++		if err != nil {
++			return err
++		}
++		
++		var rawSSMap map[string]interface{}
++		if err := json.Unmarshal([]byte(rawSS), &rawSSMap); err != nil {
++			return err
++		}
++		
++		rawReality, ok := rawSSMap["realitySettings"].(map[string]interface{})
++		if !ok {
++			return nil
++		}
++		
++		// 用数据库中的完整配置替换
++		ss["realitySettings"] = rawReality
++		
++		fixed, err := json.Marshal(ss)
++		if err != nil {
++			return err
++		}
++		
++		inbound.StreamSettings = string(fixed)
++		
++		// 更新数据库
++		if err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
++			Update("stream_settings", inbound.StreamSettings).Error; err != nil {
++			return err
++		}
++	}
++	
++	return nil
++}
+ 
+--- a/internal/web/service/inbound.go
++++ b/internal/web/service/inbound.go
+@@ 在 AddInbound 函数末尾，return nil 之前调用:
++
++	// 修复 externalProxy + REALITY Bug:
++	// 确保 realitySettings 包含完整的 publicKey 和 fingerprint
++	if err := s.preserveRealitySettings(tx, inbound); err != nil {
++		return err
++	}
++
+ 	return nil
+ }
+
+--- a/internal/web/service/inbound.go  
++++ b/internal/web/service/inbound.go
+@@ 在 UpdateInbound 函数末尾，return nil 之前调用:
++
++	// 修复 externalProxy + REALITY Bug
++	if err := s.preserveRealitySettings(tx, inbound); err != nil {
++		return err
++	}
++
+ 	return nil
+ }

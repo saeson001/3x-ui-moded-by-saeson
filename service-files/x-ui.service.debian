@@ -1,0 +1,23 @@
+[Unit]
+Description=3x-ui Panel (moded by saeson)
+Documentation=https://github.com/saeson001/3x-ui-moded-by-saeson
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/x-ui
+ExecStart=/usr/local/x-ui/x-ui
+Restart=on-failure
+RestartSec=10s
+LimitNOFILE=1048576
+
+# 安全加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/etc/x-ui /root/cert /usr/local/x-ui
+
+[Install]
+WantedBy=multi-user.target

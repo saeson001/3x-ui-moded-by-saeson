@@ -1,0 +1,136 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: '上游版本号 (如 v3.4.2)'
+        required: true
+        default: 'v3.4.2'
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: armv7
+          - goos: linux
+            goarch: armv6
+          - goos: linux
+            goarch: 386
+          - goos: linux
+            goarch: s390x
+    
+    steps:
+      - name: Checkout upstream
+        uses: actions/checkout@v4
+        with:
+          repository: MHSanaei/3x-ui
+          ref: ${{ github.event.inputs.upstream_version || github.ref_name }}
+          path: upstream
+
+      - name: Apply patches
+        run: |
+          cp -r upstream/* .
+          # Apply our custom patches
+          if [ -f patches/fix-external-proxy-reality.patch ]; then
+            patch -p1 < patches/fix-external-proxy-reality.patch || true
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+          cd ..
+
+      - name: Build Go binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o x-ui .
+          
+          # Package
+          mkdir -p release/bin
+          cp x-ui release/bin/
+          
+          # Copy xray binary
+          if [[ "${{ matrix.goos }}" == "linux" ]]; then
+            XRAY_ARCH="${{ matrix.goarch }}"
+            [[ "$XRAY_ARCH" == "armv7" ]] && XRAY_ARCH="armv7"
+            [[ "$XRAY_ARCH" == "armv6" ]] && XRAY_ARCH="armv6"
+            [[ "$XRAY_ARCH" == "386" ]] && XRAY_ARCH="386"
+            [[ "$XRAY_ARCH" == "s390x" ]] && XRAY_ARCH="s390x"
+          fi
+          
+          # Copy service files
+          cp x-ui.sh release/
+          cp x-ui.rc release/ 2>/dev/null || true
+          cp x-ui.service.* release/ 2>/dev/null || true
+          
+          cd release
+          tar czf "../x-ui-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" .
+          cd ..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-ui-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: x-ui-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "3x-ui moded by saeson ${{ github.ref_name }}"
+          body: |
+            ## 3x-ui moded by saeson ${{ github.ref_name }}
+            
+            ### 修复内容
+            - **External Proxy + REALITY Bug 修复**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 realitySettings 被清空的问题
+            
+            ### 与上游的差异
+            - 基于 MHSanaei/3x-ui 最新版
+            - 修复 externalProxy 导致 Reality 参数丢失的问题
+            - 改进的中文安装脚本
+            
+            ### 安装
+            ```bash
+            bash <(curl -fsSL https://raw.githubusercontent.com/saeson001/3x-ui-moded-by-saeson/main/install.sh)
+            ```
+          files: artifacts/*/x-ui-*.tar.gz
+          draft: false
+          prerelease: false
