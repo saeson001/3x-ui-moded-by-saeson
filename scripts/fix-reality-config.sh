@@ -365,7 +365,7 @@ case "${1:-}" in
     --reload)
         do_fix
         echo ""
-        # 先尝试温和重载（不通过 x-ui），如果失败再走 x-ui restart + 自动补修
+        # 先尝试温和重载（不通过 x-ui），如果失败再走后台补修
         RELOADED=false
         if systemctl is-active --quiet xray 2>/dev/null; then
             if systemctl reload xray 2>/dev/null; then
@@ -383,14 +383,34 @@ case "${1:-}" in
             fi
         fi
         if [ "$RELOADED" = false ]; then
-            echo -e "${YELLOW}[WARN] 需通过 x-ui restart 重载，这会重新生成 config.json${NC}"
-            echo -e "${YELLOW}[INFO] 正在重启并自动补修...${NC}"
-            x-ui restart 2>/dev/null || true
-            sleep 2
-            do_fix
-            echo -e "${GREEN}[SUCCESS] 配置已修复，xray 已通过 x-ui restart 重载${NC}"
+            # 温和重载都失败，改用后台补修方案：
+            # 1. nohup 后台运行，SSH 断开也不影响
+            # 2. x-ui restart → 重新生成 config.json（覆盖修复）
+            # 3. sleep 等 xray 启动 → --fix-only 重新修复 config.json
+            # 4. kill xray → x-ui 自动重启 xray，读取已修复的 config.json
+            echo -e "${YELLOW}[WARN] 温和重载失败，采用后台补修方案（SSH 可能暂时断开）${NC}"
+            echo -e "${YELLOW}[INFO] 后台修复日志: /var/log/fix-reality.log${NC}"
+            SCRIPT_PATH="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
+            nohup bash -c "
+                echo '[START] \$(date): 后台补修开始' >> /var/log/fix-reality.log
+                x-ui restart >> /var/log/fix-reality.log 2>&1
+                echo '[RESTARTED] \$(date): x-ui 已重启，等待 xray 启动...' >> /var/log/fix-reality.log
+                sleep 8
+                echo '[FIXING] \$(date): 重新修复 config.json...' >> /var/log/fix-reality.log
+                bash '$SCRIPT_PATH' --fix-only >> /var/log/fix-reality.log 2>&1
+                echo '[FIXED] \$(date): config.json 已修复' >> /var/log/fix-reality.log
+                # 只杀 xray 进程（x-ui 会自动重启它，且不会重新生成 config.json）
+                XPID=\$(pgrep -f 'xray run' 2>/dev/null | head -1)
+                if [ -n \"\$XPID\" ]; then
+                    kill \$XPID 2>/dev/null
+                    echo '[RELOAD] \$(date): xray (PID=\$XPID) 已终止，x-ui 将自动重启它并加载修复后的配置' >> /var/log/fix-reality.log
+                fi
+                echo '[DONE] \$(date): 修复完成，现在应该可以连接 relay 节点了' >> /var/log/fix-reality.log
+            " > /dev/null 2>&1 &
+            echo -e "${GREEN}[INFO] 后台任务已启动${NC}"
+            echo -e "${YELLOW}=== SSH 恢复后等 15 秒，然后用 Clash Party 测试 relay 节点 ==="
+            echo -e "${YELLOW}=== 查看日志: cat /var/log/fix-reality.log            ===${NC}"
         fi
-        echo -e "${GREEN}=== 配置已生效，请在 Clash Party 中测试 relay 节点 ===${NC}"
         ;;
     *)
         do_fix
