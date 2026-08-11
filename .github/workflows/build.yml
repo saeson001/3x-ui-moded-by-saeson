@@ -138,11 +138,12 @@ jobs:
           XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
           echo "Xray version: ${XRAY_VER}"
           
-          # Download and extract xray binary
+          # Download and extract xray binary + geo data files
           curl -fSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${XRAY_ARCH}.zip" -o xray.zip
-          unzip -o xray.zip xray
+          unzip -o xray.zip xray geoip.dat geosite.dat
           chmod +x xray
-          echo "Xray-core downloaded successfully"
+          ls -lh xray geoip.dat geosite.dat
+          echo "Xray-core + geo data downloaded successfully"
         continue-on-error: false
 
       - name: Package release
@@ -155,6 +156,9 @@ jobs:
           # Copy xray-core
           if [ -f xray ]; then
             cp xray "release/x-ui/bin/xray-linux-${{ matrix.goarch }}"
+            # Copy geo data files (required for xray routing)
+            cp geoip.dat release/x-ui/bin/ 2>/dev/null || echo "WARNING: geoip.dat not found"
+            cp geosite.dat release/x-ui/bin/ 2>/dev/null || echo "WARNING: geosite.dat not found"
           else
             echo "WARNING: xray binary not found, skipping"
           fi
