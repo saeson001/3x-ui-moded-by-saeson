@@ -51,10 +51,21 @@ jobs:
 
       - name: Prepare build directory
         run: |
+          # Save our custom files before copying upstream
+          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/scripts
+          cp internal/web/service/reality_fix.go /tmp/saeson-mod/internal/web/service/ 2>/dev/null || true
+          cp scripts/inject_reality_fix.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
+          
           # Copy upstream source to build root
           cp -a upstream-src/. .
-          # Remove upstream checkout to avoid confusion
           rm -rf upstream-src
+          
+          # Restore our custom files
+          cp /tmp/saeson-mod/internal/web/service/reality_fix.go internal/web/service/
+          mkdir -p scripts
+          cp /tmp/saeson-mod/scripts/inject_reality_fix.py scripts/
+          
+          echo "Build directory prepared"
 
       - name: Copy Reality fix source file
         run: |
