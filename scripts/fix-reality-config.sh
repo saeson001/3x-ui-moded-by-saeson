@@ -62,26 +62,29 @@ import json
 import sqlite3
 import os
 import shutil
+import re
 
 DB_PATH = '$DB_PATH'
 CONFIG_PATH = '$CONFIG_PATH'
 
-def url_safe_to_standard(b64):
-    '''URL-safe base64 -> standard base64'''
-    s = b64.replace('-', '+').replace('_', '/')
-    p = 4 - len(s) % 4
-    if p != 4:
-        s += '=' * p
-    return s
-
 db = sqlite3.connect(DB_PATH)
 
-# 获取所有 Reality 入站
-rows = db.execute('''
-    SELECT port, protocol, tag, stream_settings 
-    FROM inbounds 
-    WHERE stream_settings LIKE '%\"security\": \"reality\"%'
-''').fetchall()
+# 获取所有入站，在 Python 中过滤 Reality（避免 SQL LIKE 空格格式不匹配）
+all_rows = db.execute('SELECT port, protocol, tag, stream_settings FROM inbounds').fetchall()
+
+rows = []
+for r in all_rows:
+    ss_str = r[3] if r[3] else ''
+    # 检查 JSON 中 security 是否为 reality（兼容有空格/无空格两种格式）
+    if re.search(r'\"security\"\s*:\s*\"reality\"', ss_str):
+        rows.append(r)
+
+if not rows:
+    # 兜底：检查所有 stream_settings 包含 realitySettings 的入站
+    for r in all_rows:
+        ss_str = r[3] if r[3] else ''
+        if 'realitySettings' in ss_str:
+            rows.append(r)
 
 if not rows:
     print('没有找到 Reality 入站，无需修复')
@@ -191,28 +194,39 @@ db.close()
     fi
 }
 
-# 重载 xray 使修复生效
+# 重载 xray 使修复生效（不通过 x-ui restart，避免重新生成 config.json 并断开 SSH）
 reload_xray() {
-    echo -e "${YELLOW}[INFO] 正在重载 xray...${NC}"
-    if systemctl is-active --quiet x-ui 2>/dev/null; then
-        x-ui restart 2>&1
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}[INFO] x-ui 重启成功 — 但注意 x-ui restart 会重新生成 config.json，可能再次覆盖修复！${NC}"
-            echo -e "${YELLOW}[INFO] 建议先执行 fix，再单独重载 xray（不通过 x-ui restart）${NC}"
-            # 重新执行一次修复
-            echo -e "${YELLOW}[INFO] 正在重新修复（因为 x-ui restart 已覆盖配置）...${NC}"
-            do_fix
-            # 重载 xray 核心（不影响 config.json）
-            if systemctl is-active --quiet xray 2>/dev/null; then
-                systemctl reload xray 2>/dev/null || systemctl restart xray 2>/dev/null || true
-            fi
-            echo -e "${GREEN}[INFO] xray 已重载${NC}"
-        else
-            echo -e "${RED}[WARN] x-ui 重启失败，配置可能未生效${NC}"
-        fi
-    else
-        echo -e "${YELLOW}[WARN] x-ui 服务未运行${NC}"
+    echo -e "${YELLOW}[INFO] 正在重载 xray 核心...${NC}"
+
+    # 方式 1: 如果 xray 有独立的 systemd 服务，直接 reload/restart
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        echo -e "${YELLOW}[INFO] 通过 systemctl reload xray...${NC}"
+        systemctl reload xray 2>/dev/null && echo -e "${GREEN}[INFO] xray reload 成功${NC}" && return 0
+        echo -e "${YELLOW}[INFO] reload 不支持，尝试 restart xray...${NC}"
+        systemctl restart xray 2>/dev/null && echo -e "${GREEN}[INFO] xray restart 成功${NC}" && return 0
     fi
+
+    # 方式 2: 找 xray 进程，发送 SIGHUP 重载
+    XRAY_PID=$(pgrep -f 'xray run' 2>/dev/null | head -1)
+    if [ -n "$XRAY_PID" ]; then
+        echo -e "${YELLOW}[INFO] 找到 xray 进程 (PID=$XRAY_PID)，发送 -HUP 信号重载...${NC}"
+        kill -HUP "$XRAY_PID" 2>/dev/null && echo -e "${GREEN}[INFO] 已发送重载信号${NC}" && return 0
+    fi
+
+    # 方式 3: 使用 x-ui 的内置重启（注意：会重新生成 config.json）
+    if which x-ui >/dev/null 2>&1; then
+        echo -e "${YELLOW}[INFO] 自动重载失败，将使用 x-ui 重启，请在 5 秒后重新执行本脚本以修复被覆盖的 config.json${NC}"
+        echo -e "${YELLOW}[INFO] 执行后会断开 SSH（xray 重启导致），预计 5 秒后恢复${NC}"
+        x-ui restart >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    echo -e "${YELLOW}[INFO] 无法自动重载，请手动执行:${NC}"
+    echo -e "${YELLOW}  如果你有独立的 xray 服务: systemctl restart xray${NC}"
+    echo -e "${YELLOW}  如果 xray 由 x-ui 管理: x-ui restart${NC}"
+    echo -e "${YELLOW}  ⚠️ x-ui restart 会重新生成 config.json，之后需再次执行:${NC}"
+    echo -e "${YELLOW}     bash /tmp/fix.sh${NC}"
+    return 0
 }
 
 # 安装 systemd path watcher
@@ -279,13 +293,17 @@ check() {
     python3 -c "
 import json
 import sqlite3
+import re
 
 db = sqlite3.connect('$DB_PATH')
-rows = db.execute('''
-    SELECT port, protocol, tag, stream_settings 
-    FROM inbounds 
-    WHERE stream_settings LIKE '%\"security\": \"reality\"%'
-''').fetchall()
+all_rows = db.execute('SELECT port, protocol, tag, stream_settings FROM inbounds').fetchall()
+
+# 在 Python 中过滤 Reality 入站（避免 SQL LIKE 格式不匹配）
+rows = []
+for r in all_rows:
+    ss_str = r[3] if r[3] else ''
+    if re.search(r'\"security\"\s*:\s*\"reality\"', ss_str) or 'realitySettings' in ss_str:
+        rows.append(r)
 
 if not rows:
     print('没有找到 Reality 入站')
@@ -346,7 +364,33 @@ case "${1:-}" in
         ;;
     --reload)
         do_fix
-        reload_xray
+        echo ""
+        # 先尝试温和重载（不通过 x-ui），如果失败再走 x-ui restart + 自动补修
+        RELOADED=false
+        if systemctl is-active --quiet xray 2>/dev/null; then
+            if systemctl reload xray 2>/dev/null; then
+                echo -e "${GREEN}[SUCCESS] xray 已通过 systemctl reload 重载，配置已生效${NC}"
+                RELOADED=true
+            fi
+        fi
+        if [ "$RELOADED" = false ]; then
+            XRAY_PID=$(pgrep -f 'xray run' 2>/dev/null | head -1)
+            if [ -n "$XRAY_PID" ]; then
+                if kill -HUP "$XRAY_PID" 2>/dev/null; then
+                    echo -e "${GREEN}[SUCCESS] xray (PID=$XRAY_PID) 已通过 SIGHUP 重载${NC}"
+                    RELOADED=true
+                fi
+            fi
+        fi
+        if [ "$RELOADED" = false ]; then
+            echo -e "${YELLOW}[WARN] 需通过 x-ui restart 重载，这会重新生成 config.json${NC}"
+            echo -e "${YELLOW}[INFO] 正在重启并自动补修...${NC}"
+            x-ui restart 2>/dev/null || true
+            sleep 2
+            do_fix
+            echo -e "${GREEN}[SUCCESS] 配置已修复，xray 已通过 x-ui restart 重载${NC}"
+        fi
+        echo -e "${GREEN}=== 配置已生效，请在 Clash Party 中测试 relay 节点 ===${NC}"
         ;;
     *)
         do_fix
