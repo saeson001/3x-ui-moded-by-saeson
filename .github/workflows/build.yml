@@ -103,10 +103,30 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
         run: |
-          go mod tidy
-          go build -ldflags="-s -w" -o x-ui .
+          echo "=== Go version ==="
+          go version
+          
+          # Detect native vs cross-compilation
+          HOST_ARCH=$(go env GOHOSTARCH)
+          if [ "$GOARCH" = "$HOST_ARCH" ] && [ "$GOOS" = "linux" ]; then
+            echo "Native build: CGO enabled"
+            export CGO_ENABLED=1
+          else
+            echo "Cross-compile: CGO disabled"
+            export CGO_ENABLED=0
+          fi
+          
+          echo "GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=$CGO_ENABLED"
+          
+          echo "=== Downloading Go dependencies ==="
+          go mod download 2>&1
+          
+          echo "=== Building x-ui ==="
+          go build -v -ldflags="-s -w" -o x-ui . 2>&1
+          
+          echo "=== Build complete ==="
+          ls -lh x-ui
 
       - name: Download xray-core
         run: |
