@@ -212,7 +212,7 @@ export default function ClientQrModal({
     return out;
   }, [subLink, subJsonLink, subClashLink, wgConfigText, links, client?.email, t]);
 
-  // Restore activeKey from localStorage on open; default to first item
+  // Restore activeKey from localStorage on open; default to first link item
   useEffect(() => {
     if (!open) {
       setActiveKey([]);
@@ -235,11 +235,16 @@ export default function ClientQrModal({
     setActiveKey(items.length > 0 ? [items[0].key] : []);
   }, [open, items]);
 
+  const SUB_KEYS = new Set(['sub', 'subJson', 'subClash']);
+
   const handleChange = useCallback((keys: string | string[]) => {
     const next = typeof keys === 'string' ? [keys] : (keys as string[]);
     setActiveKey(next);
     try {
-      localStorage.setItem(ACTIVE_KEY_STORAGE, JSON.stringify(next));
+      // 只持久化非订阅项的展开状态；订阅项展开不保存，
+      // 这样下次打开弹窗默认回到直链，不会"记忆"在订阅信息上
+      const persist = next.filter(k => !SUB_KEYS.has(k));
+      localStorage.setItem(ACTIVE_KEY_STORAGE, JSON.stringify(persist));
     } catch { /* ignore */ }
   }, []);
 
