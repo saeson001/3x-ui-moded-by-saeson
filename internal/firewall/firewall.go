@@ -259,7 +259,7 @@ func Enable(db *gorm.DB, extraPorts []int) (*Status, error) {
 		cfg.ExtraPorts = extraPorts
 	}
 
-	ssh, panel, inbounds, all := collectAllPorts(db, cfg)
+	ssh, panel, _, all := collectAllPorts(db, cfg)
 
 	// Safety checks: must keep SSH + panel reachable.
 	if len(ssh) == 0 {
