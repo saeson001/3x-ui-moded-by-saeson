@@ -14,6 +14,11 @@
   3. 兜底:          client.email == clients.email
 匹配不到（如单节点多客户端未同步全）时自动新建 clients 记录 + client_inbounds 关联。
 
+⚠️ 幂等判定修正（v2）：入站 JSON 的 subId 非空不代表正确——x-ui-yg 迁移来的
+JSON 常带旧版 16 位 subId，而 clients 表 sub_id 是 UUID，两者不一致会导致
+matchingClients 匹配失败、subLinks 接口直链为空。现在改为「与 clients.sub_id
+不一致才覆盖」，一致则跳过。
+
 用法：
     python3 patch_inbound_subid.py             # 执行
     python3 patch_inbound_subid.py --dry-run   # 只预览不写入
@@ -105,8 +110,6 @@ def main():
         for c in c_arr:
             if not isinstance(c, dict):
                 continue
-            if c.get("subId"):
-                continue  # 已有 subId，幂等跳过
 
             cid = c.get("id") or ""
             pw = c.get("password") or ""
@@ -121,9 +124,15 @@ def main():
             elif em and em in by_email:
                 rec = by_email[em]
 
+            cur_sub = c.get("subId") or ""
             if rec and rec["sub_id"]:
                 sid = rec["sub_id"]
-                action = "回写"
+                if cur_sub == sid:
+                    continue  # 已一致，幂等跳过
+                # 不一致必须覆盖：迁移来的入站 JSON 常带旧版 16 位 subId，
+                # 而 clients 表 sub_id 是 UUID，matchingClients 按 subId 精确
+                # 比对，两者不一致会导致 subLinks 接口直链为空。
+                action = "纠正" if cur_sub else "回写"
             else:
                 # 无对应记录或记录无 sub_id：新建/补全 clients 记录
                 email = em or (remark or "").strip() or f"node-{tag or ib_id}"
