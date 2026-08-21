@@ -2,6 +2,40 @@
 
 > 基于 [MHSanaei/3x-ui](https://github.com/MHSanaei/3x-ui) 最新版的增强分支
 
+## 新功能 (v1.3.0)
+
+### 流量构成区分 — Xray 流量 vs 系统流量
+
+**功能：** 系统状态页（首页）新增两张与"整体速度"同款样式的卡片：
+
+- **Xray 代理流量** — 经过 3x-ui 入站节点转发的流量（面板统计口径），含实时速率和累计值
+- **系统流量（非代理）** — 网卡总流量减去 Xray 流量，即 SSH/端口扫描/暴力破解/系统更新等 VPS 自身流量
+
+**背景：** VPS 商按网卡总流量计费，而 3x-ui 面板只统计经过 Xray 的流量。两张卡片 + 原有"整体速度/总数据"卡片，一眼看出：计费流量里多少走了代理、多少被扫描/攻击吃掉了。
+
+### 防火墙一键管理 — 面板 + SSH 命令行双入口
+
+**面板（系统状态页新增"防火墙"卡片）：**
+- 一键开启：自动放行 SSH 端口 + 面板端口 + 订阅端口 + 全部节点端口 + 自定义端口，其余入站一律拒绝（出站不受影响）
+- 防锁定保护：开启前强制校验 SSH 与面板端口在放行列表
+- 端口管理弹窗：分组显示 SSH/面板/节点/自定义端口，可添加/移除自定义端口
+- 同步端口：新增入站节点后一键放行新端口
+- 支持 ufw（Debian/Ubuntu）和 firewalld（CentOS/RHEL）双后端
+
+**SSH 命令行（`x-ui` 命令 → 选项 23）：**
+- 一键安全开启（自动收集 SSH/面板/节点端口后启用）
+- 同步节点端口、开放/删除自定义端口、状态查看
+
+**API：**
+```bash
+GET  /panel/api/netstats            # 网卡/Xray/系统流量速率与累计
+GET  /panel/api/firewall/status     # 防火墙状态与放行端口
+POST /panel/api/firewall/enable     # 一键开启 {"extraPorts":[...]}
+POST /panel/api/firewall/disable    # 关闭
+POST /panel/api/firewall/sync       # 同步节点端口
+POST /panel/api/firewall/ports      # {"port":8080,"action":"add"|"remove"}
+```
+
 ## 新功能 (v1.2.0)
 
 ### Clash Link — 一键生成 Clash Party 配置文件

@@ -1065,14 +1065,187 @@ show_mtproto_status() {
     done
 }
 
+# --- Firewall Management (saeson mod: multi-backend + auto port discovery) ---
+
+detect_fw_backend() {
+    if command -v ufw &>/dev/null; then
+        echo "ufw"
+    elif command -v firewall-cmd &>/dev/null; then
+        echo "firewalld"
+    else
+        echo ""
+    fi
+}
+
+get_ssh_ports() {
+    local ports=()
+    if command -v ss &>/dev/null; then
+        while read -r line; do
+            if echo "$line" | grep -q sshd; then
+                local port
+                port=$(echo "$line" | awk '{print $4}' | rev | cut -d':' -f1 | rev)
+                [[ "$port" =~ ^[0-9]+$ ]] && ports+=("$port")
+            fi
+        done < <(ss -tlnp 2>/dev/null)
+    fi
+    if [ ${#ports[@]} -eq 0 ]; then
+        ports+=(22)
+    fi
+    echo "${ports[@]}" | tr ' ' '\n' | sort -un | tr '\n' ' '
+}
+
+get_panel_ports() {
+    local ports=()
+    if command -v ss &>/dev/null; then
+        while read -r line; do
+            if echo "$line" | grep -q 'x-ui\|xui'; then
+                local port
+                port=$(echo "$line" | awk '{print $4}' | rev | cut -d':' -f1 | rev)
+                [[ "$port" =~ ^[0-9]+$ ]] && ports+=("$port")
+            fi
+        done < <(ss -tlnp 2>/dev/null)
+    fi
+    echo "${ports[@]}" | tr ' ' '\n' | sort -un | tr '\n' ' '
+}
+
+get_node_ports() {
+    local config="/usr/local/x-ui/bin/config.json"
+    if [ -f "$config" ] && command -v python3 &>/dev/null; then
+        python3 -c "
+import json,sys
+try:
+    with open('$config') as f:
+        cfg=json.load(f)
+    ports=sorted({str(i.get('port','')) for i in cfg.get('inbounds',[]) if i.get('port')})
+    print(' '.join(ports))
+except Exception:
+    pass
+" 2>/dev/null
+    elif [ -f "$config" ]; then
+        grep -o '"port":[0-9]*' "$config" | cut -d':' -f2 | sort -un | tr '\n' ' '
+    fi
+}
+
+fw_allow_port() {
+    local backend="$1" port="$2"
+    if [ "$backend" = "ufw" ]; then
+        ufw allow "$port/tcp" >/dev/null 2>&1
+        ufw allow "$port/udp" >/dev/null 2>&1
+    elif [ "$backend" = "firewalld" ]; then
+        firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1
+        firewall-cmd --permanent --add-port="$port/udp" >/dev/null 2>&1
+    fi
+}
+
+fw_is_active() {
+    local backend="$1"
+    if [ "$backend" = "ufw" ]; then
+        ufw status 2>/dev/null | grep -q "Status: active"
+    elif [ "$backend" = "firewalld" ]; then
+        [ "$(firewall-cmd --state 2>/dev/null)" = "running" ]
+    else
+        return 1
+    fi
+}
+
+firewall_secure_enable() {
+    local backend
+    backend=$(detect_fw_backend)
+    if [ -z "$backend" ]; then
+        echo -e "${red}[ERR] No supported firewall found. Install ufw (Debian/Ubuntu) or firewalld (CentOS/RHEL) first.${plain}"
+        echo -e "      apt-get install -y ufw    |    yum install -y firewalld"
+        return 1
+    fi
+
+    local ssh_ports panel_ports node_ports
+    ssh_ports=$(get_ssh_ports)
+    panel_ports=$(get_panel_ports)
+    node_ports=$(get_node_ports)
+
+    echo -e "${green}[INF] Firewall backend: ${backend}${plain}"
+    echo "  SSH ports   : ${ssh_ports}"
+    echo "  Panel ports : ${panel_ports}"
+    echo "  Node ports  : ${node_ports:-none}"
+
+    if [ -z "$(echo ${ssh_ports} | tr -d ' ')" ]; then
+        echo -e "${red}[ERR] Could not detect SSH port, refusing to enable (to avoid locking yourself out).${plain}"
+        return 1
+    fi
+    if [ -z "$(echo ${panel_ports} | tr -d ' ')" ]; then
+        echo -e "${yellow}[DEG] Panel port not detected via ss; only SSH + node ports will be allowed.${plain}"
+    fi
+
+    confirm "This will DENY all other inbound traffic (outbound is unaffected). Continue?" "y"
+    if [[ $? != 0 ]]; then
+        LOGE "Cancelled"
+        return 0
+    fi
+
+    if [ "$backend" = "ufw" ]; then
+        ufw default deny incoming >/dev/null 2>&1
+        ufw default allow outgoing >/dev/null 2>&1
+    else
+        firewall-cmd --set-default-zone=public >/dev/null 2>&1
+        firewall-cmd --permanent --set-default-zone=public >/dev/null 2>&1
+    fi
+
+    local all_ports
+    all_ports="$(echo "$ssh_ports $panel_ports $node_ports" | tr ' ' '\n' | sort -un | tr '\n' ' ')"
+    for port in $all_ports; do
+        fw_allow_port "$backend" "$port"
+        echo "  allowed: $port"
+    done
+
+    if [ "$backend" = "ufw" ]; then
+        ufw --force enable >/dev/null 2>&1
+    else
+        firewall-cmd --reload >/dev/null 2>&1
+    fi
+
+    echo ""
+    echo -e "${green}[INF] Firewall enabled. Allowed ports (SSH + panel + nodes):${plain}"
+    echo "  $all_ports"
+    echo -e "${green}[INF] Add a custom port later with: ufw allow <port>  (or menu option 3)${plain}"
+}
+
+firewall_sync_nodes() {
+    local backend
+    backend=$(detect_fw_backend)
+    if [ -z "$backend" ]; then
+        echo -e "${red}[ERR] No supported firewall found.${plain}"
+        return 1
+    fi
+    if ! fw_is_active "$backend"; then
+        echo -e "${yellow}[DEG] Firewall is not active. Use option 2 (one-click secure enable) first.${plain}"
+        return 1
+    fi
+    local node_ports
+    node_ports=$(get_node_ports)
+    if [ -z "$node_ports" ]; then
+        echo -e "${yellow}[DEG] No node ports found in xray config.${plain}"
+        return 0
+    fi
+    for port in $node_ports; do
+        fw_allow_port "$backend" "$port"
+        echo "  allowed: $port"
+    done
+    [ "$backend" = "firewalld" ] && firewall-cmd --reload >/dev/null 2>&1
+    echo -e "${green}[INF] Node ports synced: ${node_ports}${plain}"
+}
+
 firewall_menu() {
-    echo -e "${green}\t1.${plain} ${green}Install${plain} Firewall"
-    echo -e "${green}\t2.${plain} Port List [numbered]"
-    echo -e "${green}\t3.${plain} ${green}Open${plain} Ports"
-    echo -e "${green}\t4.${plain} ${red}Delete${plain} Ports from List"
-    echo -e "${green}\t5.${plain} ${green}Enable${plain} Firewall"
+    local backend
+    backend=$(detect_fw_backend)
+    echo -e ""
+    echo -e "${green}Firewall Management${plain}  (backend: ${backend:-${red}none${plain}})"
+    echo -e "${green}\t1.${plain} Install Firewall (ufw/firewalld)"
+    echo -e "${green}\t2.${plain} ${green}One-Click Secure Enable${plain} (auto allow SSH + panel + ALL node ports)"
+    echo -e "${green}\t3.${plain} ${green}Open${plain} Custom Ports"
+    echo -e "${green}\t4.${plain} ${red}Delete${plain} Ports"
+    echo -e "${green}\t5.${plain} Enable Firewall (plain)"
     echo -e "${green}\t6.${plain} ${red}Disable${plain} Firewall"
     echo -e "${green}\t7.${plain} Firewall Status"
+    echo -e "${green}\t8.${plain} Sync Node Ports (allow newly added inbound ports)"
     echo -e "${green}\t0.${plain} Back to Main Menu"
     read -rp "Choose an option: " choice
     case "$choice" in
@@ -1084,7 +1257,7 @@ firewall_menu() {
             firewall_menu
             ;;
         2)
-            ufw status numbered
+            firewall_secure_enable
             firewall_menu
             ;;
         3)
@@ -1096,15 +1269,31 @@ firewall_menu() {
             firewall_menu
             ;;
         5)
-            ufw enable
+            if [ "$backend" = "firewalld" ]; then
+                firewall-cmd --set-default-zone=public && firewall-cmd --reload
+            else
+                ufw enable
+            fi
             firewall_menu
             ;;
         6)
-            ufw disable
+            if [ "$backend" = "firewalld" ]; then
+                firewall-cmd --set-default-zone=trusted && firewall-cmd --reload
+            else
+                ufw disable
+            fi
             firewall_menu
             ;;
         7)
-            ufw status verbose
+            if [ "$backend" = "firewalld" ]; then
+                firewall-cmd --list-all
+            else
+                ufw status verbose
+            fi
+            firewall_menu
+            ;;
+        8)
+            firewall_sync_nodes
             firewall_menu
             ;;
         *)
@@ -1115,28 +1304,19 @@ firewall_menu() {
 }
 
 install_firewall() {
-    if ! command -v ufw &> /dev/null; then
-        echo "ufw firewall is not installed. Installing now..."
-        apt-get update
-        apt-get install -y ufw
-    else
-        echo "ufw firewall is already installed"
+    if command -v ufw &>/dev/null || command -v firewall-cmd &>/dev/null; then
+        echo "Firewall is already installed ($(detect_fw_backend))"
+        return 0
     fi
-
-    # Check if the firewall is inactive
-    if ufw status | grep -q "Status: active"; then
-        echo "Firewall is already active"
+    if command -v apt-get &>/dev/null; then
+        echo "Installing ufw..."
+        apt-get update -qq
+        apt-get install -y ufw
+    elif command -v yum &>/dev/null || command -v dnf &>/dev/null; then
+        echo "Installing firewalld..."
+        (dnf install -y firewalld 2>/dev/null || yum install -y firewalld) && systemctl enable --now firewalld
     else
-        echo "Activating firewall..."
-        # Open the necessary ports
-        ufw allow ssh
-        ufw allow http
-        ufw allow https
-        ufw allow 2053/tcp #webPort
-        ufw allow 2096/tcp #subport
-
-        # Enable the firewall
-        ufw --force enable
+        echo -e "${red}Unsupported package manager. Install ufw or firewalld manually.${plain}"
     fi
 }
 

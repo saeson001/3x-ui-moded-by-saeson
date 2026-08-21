@@ -45,38 +45,51 @@ jobs:
       - name: Prepare build directory
         run: |
           # Save our custom files before copying upstream
-          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/internal/web/controller /tmp/saeson-mod/internal/clash_link /tmp/saeson-mod/scripts
+          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/internal/web/controller /tmp/saeson-mod/internal/clash_link /tmp/saeson-mod/internal/netstats /tmp/saeson-mod/internal/firewall /tmp/saeson-mod/scripts
           cp internal/web/service/reality_fix.go /tmp/saeson-mod/internal/web/service/ 2>/dev/null || true
           cp internal/web/controller/clash_link_routes.go /tmp/saeson-mod/internal/web/controller/ 2>/dev/null || true
+          cp internal/web/controller/saeson_routes.go /tmp/saeson-mod/internal/web/controller/ 2>/dev/null || true
           cp internal/clash_link/*.go /tmp/saeson-mod/internal/clash_link/ 2>/dev/null || true
+          cp internal/netstats/*.go /tmp/saeson-mod/internal/netstats/ 2>/dev/null || true
+          cp internal/firewall/*.go /tmp/saeson-mod/internal/firewall/ 2>/dev/null || true
           cp scripts/inject_reality_fix.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_clash_link.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
+          cp scripts/inject_saeson_routes.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           # Save our custom x-ui.sh (with Clash Link info in option 4)
           cp x-ui.sh /tmp/saeson-mod/ 2>/dev/null || true
-          
+
           # Copy upstream source to build root
           cp -a upstream-src/. .
           rm -rf upstream-src
-          
+
           # Restore our custom files
           cp /tmp/saeson-mod/internal/web/service/reality_fix.go internal/web/service/
           cp /tmp/saeson-mod/internal/web/controller/clash_link_routes.go internal/web/controller/
+          cp /tmp/saeson-mod/internal/web/controller/saeson_routes.go internal/web/controller/
           mkdir -p internal/clash_link
           cp /tmp/saeson-mod/internal/clash_link/*.go internal/clash_link/
+          mkdir -p internal/netstats internal/firewall
+          cp /tmp/saeson-mod/internal/netstats/*.go internal/netstats/
+          cp /tmp/saeson-mod/internal/firewall/*.go internal/firewall/
           mkdir -p scripts
           cp /tmp/saeson-mod/scripts/inject_reality_fix.py scripts/
           cp /tmp/saeson-mod/scripts/inject_clash_link.py scripts/
+          cp /tmp/saeson-mod/scripts/inject_saeson_routes.py scripts/
           # Restore custom x-ui.sh
           cp /tmp/saeson-mod/x-ui.sh . 2>/dev/null || true
-          
+
           # Apply frontend patches (Clash subscription in QR modal)
           if [ -d frontend-patches ]; then
             cp -f frontend-patches/pages/inbounds/qr/QrCodeModal.tsx frontend/src/pages/inbounds/qr/QrCodeModal.tsx
             cp -f frontend-patches/pages/clients/ClientQrModal.tsx frontend/src/pages/clients/ClientQrModal.tsx
-            echo "Frontend patches applied (Clash subscription in QR modal)"
+            # saeson: traffic breakdown + firewall cards on dashboard
+            cp -f frontend-patches/pages/index/IndexPage.tsx frontend/src/pages/index/IndexPage.tsx
+            cp -f frontend-patches/pages/index/SaesonTrafficCard.tsx frontend/src/pages/index/SaesonTrafficCard.tsx
+            cp -f frontend-patches/pages/index/SaesonFirewallCard.tsx frontend/src/pages/index/SaesonFirewallCard.tsx
+            echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall)"
           fi
-          
-          echo "Build directory prepared with clash_link module"
+
+          echo "Build directory prepared with clash_link + netstats + firewall modules"
 
       - name: Copy Reality fix source file
         run: |
@@ -95,6 +108,11 @@ jobs:
         run: |
           python3 scripts/inject_clash_link.py . .
           echo "Clash Link injection complete"
+
+      - name: Inject saeson netstats + firewall modules
+        run: |
+          python3 scripts/inject_saeson_routes.py . .
+          echo "Saeson netstats + firewall injection complete"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -235,29 +253,26 @@ jobs:
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
 
-            ### 修复内容
+            ### 新功能 (v1.3.0)
+            - **流量构成区分**: 系统状态页新增「Xray 代理流量」与「系统流量（非代理）」卡片，与"整体速度"同款样式 —— 一眼看出 VPS 计费流量中多少走了代理、多少是 VPS 自身（SSH/扫描/其他服务）
+            - **防火墙一键管理**: 系统状态页新增「防火墙」卡片，一键开启仅放行 SSH / 面板 / 全部节点端口 / 自定义端口，其余入站一律拒绝（出站不受影响）；支持 ufw 与 firewalld 双后端
+            - **防锁定保护**: 开启防火墙前强制校验 SSH 端口与面板端口在放行列表，绝不把自己锁在外面
+            - **SSH 命令行防火墙菜单**: x-ui.sh 选项 23 全面增强 —— 一键安全开启（自动收集 SSH/面板/节点端口）、同步节点端口、多后端支持
+
+            ### 既有功能
             - **External Proxy + REALITY Bug 修复 (Go 源码级)**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 publicKey 和 fingerprint 被清空为 null 的问题
+            - **Clash Link 订阅**: 一键生成 Clash Party 配置链接，多节点聚合，Token URL 订阅
+            - **REALITY 参数修复**: 正确输出 public-key、short-id、fingerprint、servername 等 REALITY 参数
 
-            ### 新功能 (Clash Link 订阅)
-            - **一键生成 Clash Party 配置链接**: 从 3x-ui 入站节点直接生成 Clash Meta YAML 配置文件
-            - **VLESS+REALITY 完整兼容**: 正确输出 public-key、short-id、fingerprint、servername 等 REALITY 参数
-            - **多节点聚合**: 将多个 3x-ui 入站合并到一个 Clash 配置文件中
-            - **Token URL**: 生成固定链接，可直接粘贴到 Clash Party 作为订阅地址
-            - **配置备份导出**: 一键导出所有入站、客户端、Host 等设置到 JSON 文件
-
-            ### 增强 (v1.2.2)
-            - **x-ui 命令选项 4 增强**: 现在显示服务器 IP、面板 URL、账号密码、Clash Link API 端点等完整信息，无需再手动翻找
-            - **chmod 修复**: 安装脚本增加 x-ui.sh 可执行权限设置
-
-            ### API 端点
+            ### API 端点 (saeson mod)
+            - `GET /panel/api/netstats` — 网卡/Xray/系统流量速率与累计
+            - `GET /panel/api/firewall/status` — 防火墙状态与放行端口
+            - `POST /panel/api/firewall/enable` — 一键开启防火墙
+            - `POST /panel/api/firewall/disable` — 关闭防火墙
+            - `POST /panel/api/firewall/sync` — 同步节点端口
+            - `POST /panel/api/firewall/ports` — 添加/移除自定义端口
             - `POST /panel/api/clash-link/generate` — 生成 Clash 配置链接
-            - `GET /d/:token` — 获取 Clash YAML 配置（可直接粘贴到 Clash Party）
-            - `GET /panel/api/clash-link/backup` — 导出完整配置备份
-            - `GET /panel/api/clash-link/list` — 列出所有已生成的配置链接
-
-            ### 架构
-            - **linux-amd64**: 包含所有修复和功能的完整编译版
-            - **其他架构 (arm64/armv7/...)** : 请使用一键安装脚本，将自动使用上游二进制 + 运行时修复方案
+            - `GET /d/:token` — 获取 Clash YAML 配置
 
             ### 一键安装
             ```bash
