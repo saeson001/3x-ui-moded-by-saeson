@@ -6,6 +6,12 @@ blue='\033[0;34m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
+# 仓库源：安装/更新一律走本魔改仓库（saeson001），绝不回退上游官方版，
+# 否则会用 MHSanaei 官方二进制覆盖魔改功能（Clash Link/流量监控/防火墙/汉化）
+REPO_OWNER="saeson001"
+REPO_NAME="3x-ui-moded-by-saeson"
+REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
+
 #Add some basic function here
 function LOGD() {
     echo -e "${yellow}[DEG] $* ${plain}"
@@ -129,7 +135,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/install.sh)
+    bash <(curl -Ls ${REPO_RAW}/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -148,7 +154,9 @@ update() {
         fi
         return 0
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
+    # 走本仓库的 install.sh（自带备份/恢复数据逻辑，等效于更新），
+    # 二进制从本仓库 release 下载，保留全部魔改功能
+    bash <(curl -Ls ${REPO_RAW}/install.sh)
     if [[ $? == 0 ]]; then
         LOGI "更新完成，面板已自动重启"
         before_show_menu
@@ -156,21 +164,13 @@ update() {
 }
 
 update_dev() {
-    confirm "This will update x-ui to the latest DEV commit (the rolling 'dev-latest' build, not a stable release). Your data is preserved. Continue?" "y"
-    if [[ $? != 0 ]]; then
-        LOGE "Cancelled"
-        if [[ $# == 0 ]]; then
-            before_show_menu
-        fi
-        return 0
-    fi
-    # XUI_UPDATE_TAG tells update.sh to install the dev-latest pre-release
-    # instead of the latest stable tag.
-    XUI_UPDATE_TAG="dev-latest" bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
-    if [[ $? == 0 ]]; then
-        LOGI "Dev update is complete, Panel has automatically restarted "
+    # 本仓库不发布 dev-latest 开发版构建，上游 dev 版不含魔改功能，
+    # 安装会覆盖丢失 Clash Link/流量监控/防火墙/汉化，因此禁用该入口
+    LOGE "本仓库不提供开发版（dev）构建，请使用 x-ui update 更新到最新稳定版"
+    if [[ $# == 0 ]]; then
         before_show_menu
     fi
+    return 0
 }
 
 replace_xui_script() {
@@ -219,7 +219,7 @@ update_menu() {
         return 0
     fi
 
-    if replace_xui_script "https://raw.githubusercontent.com/saeson001/3x-ui-moded-by-saeson/main/x-ui.sh" "false"; then
+    if replace_xui_script "${REPO_RAW}/x-ui.sh" "false"; then
         chmod +x ${xui_folder}/x-ui.sh
         echo -e "${green}Update successful. The panel has automatically restarted.${plain}"
         exit 0
@@ -886,8 +886,8 @@ enable_bbr() {
 }
 
 update_shell() {
-    if replace_xui_script "https://github.com/MHSanaei/3x-ui/raw/main/x-ui.sh" "true"; then
-        LOGI "Upgrade script succeeded, Please rerun the script"
+    if replace_xui_script "${REPO_RAW}/x-ui.sh" "true"; then
+        LOGI "菜单脚本更新成功，请重新运行 x-ui"
         before_show_menu
     else
         echo ""
@@ -3621,8 +3621,8 @@ show_usage() {
 │  ${blue}x-ui disable${plain}               - 禁用开机自启                │
 │  ${blue}x-ui log${plain}                   - 查看日志                    │
 │  ${blue}x-ui banlog${plain}                - 查看 Fail2ban 封禁日志      │
-│  ${blue}x-ui update${plain}                - 更新                       │
-│  ${blue}x-ui update-dev${plain}            - 更新到开发版（最新提交）    │
+│  ${blue}x-ui update${plain}                - 更新（本仓库魔改版）       │
+│  ${blue}x-ui update-dev${plain}            - 开发版（本仓库未提供）      │
 │  ${blue}x-ui update-all-geofiles${plain}   - 更新所有 Geo 文件           │
 │  ${blue}x-ui migrateDB [file]${plain}      - 转换 .db <-> .dump (SQLite) │
 │  ${blue}x-ui pgclient [ver]${plain}        - 升级 pg_dump/pg_restore   │
@@ -3638,9 +3638,9 @@ show_menu() {
 │  ${green}3X-UI 面板管理脚本${plain}                           │
 │  ${green}0.${plain} 退出脚本                               │
 │────────────────────────────────────────────────│
-│  ${green}1.${plain} 安装                                     │
-│  ${green}2.${plain} 更新                                     │
-│  ${green}3.${plain} 更新到开发通道（最新提交）               │
+│  ${green}1.${plain} 安装（本仓库魔改版）                     │
+│  ${green}2.${plain} 更新（本仓库魔改版）                     │
+│  ${green}3.${plain} 开发通道（本仓库未提供）                 │
 │  ${green}4.${plain} 查看面板设置                             │
 │  ${green}5.${plain} 旧版本                                   │
 │  ${green}6.${plain} 卸载                                     │
