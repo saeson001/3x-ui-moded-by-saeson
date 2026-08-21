@@ -115,7 +115,7 @@ confirm() {
 }
 
 confirm_restart() {
-    confirm "Restart the panel, Attention: Restarting the panel will also restart xray" "y"
+    confirm "是否重启面板？注意：重启面板也会重启 Xray" "y"
     if [[ $? == 0 ]]; then
         restart
     else
@@ -124,7 +124,7 @@ confirm_restart() {
 }
 
 before_show_menu() {
-    echo && echo -n -e "${yellow}Press enter to return to the main menu: ${plain}" && read -r temp
+    echo && echo -n -e "${yellow}按回车键返回主菜单: ${plain}" && read -r temp
     show_menu
 }
 
@@ -140,9 +140,9 @@ install() {
 }
 
 update() {
-    confirm "This function will update all x-ui components to the latest version, and the data will not be lost. Do you want to continue?" "y"
+    confirm "此操作将更新 x-ui 到最新版本，数据不会丢失。是否继续？" "y"
     if [[ $? != 0 ]]; then
-        LOGE "Cancelled"
+        LOGE "已取消"
         if [[ $# == 0 ]]; then
             before_show_menu
         fi
@@ -150,7 +150,7 @@ update() {
     fi
     bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
     if [[ $? == 0 ]]; then
-        LOGI "Update is complete, Panel has automatically restarted "
+        LOGI "更新完成，面板已自动重启"
         before_show_menu
     fi
 }
@@ -992,15 +992,15 @@ show_status() {
     check_status
     case $? in
         0)
-            echo -e "Panel state: ${green}Running${plain}"
+            echo -e "面板状态: ${green}运行中${plain}"
             show_enable_status
             ;;
         1)
-            echo -e "Panel state: ${yellow}Not Running${plain}"
+            echo -e "面板状态: ${yellow}已停止${plain}"
             show_enable_status
             ;;
         2)
-            echo -e "Panel state: ${red}Not Installed${plain}"
+            echo -e "面板状态: ${red}未安装${plain}"
             ;;
     esac
     show_xray_status
@@ -1009,14 +1009,14 @@ show_status() {
 
 show_enable_status() {
     if [[ "${running_in_docker}" == "true" ]]; then
-        echo -e "Start automatically: ${green}Managed by Docker${plain}"
+        echo -e "开机自启: ${green}由 Docker 管理${plain}"
         return
     fi
     check_enabled
     if [[ $? == 0 ]]; then
-        echo -e "Start automatically: ${green}Yes${plain}"
+        echo -e "开机自启: ${green}已启用${plain}"
     else
-        echo -e "Start automatically: ${red}No${plain}"
+        echo -e "开机自启: ${red}未启用${plain}"
     fi
 }
 
@@ -1032,9 +1032,9 @@ check_xray_status() {
 show_xray_status() {
     check_xray_status
     if [[ $? == 0 ]]; then
-        echo -e "xray state: ${green}Running${plain}"
+        echo -e "Xray 状态: ${green}运行中${plain}"
     else
-        echo -e "xray state: ${red}Not Running${plain}"
+        echo -e "Xray 状态: ${red}已停止${plain}"
     fi
 }
 
@@ -1237,17 +1237,17 @@ firewall_menu() {
     local backend
     backend=$(detect_fw_backend)
     echo -e ""
-    echo -e "${green}Firewall Management${plain}  (backend: ${backend:-${red}none${plain}})"
-    echo -e "${green}\t1.${plain} Install Firewall (ufw/firewalld)"
-    echo -e "${green}\t2.${plain} ${green}One-Click Secure Enable${plain} (auto allow SSH + panel + ALL node ports)"
-    echo -e "${green}\t3.${plain} ${green}Open${plain} Custom Ports"
-    echo -e "${green}\t4.${plain} ${red}Delete${plain} Ports"
-    echo -e "${green}\t5.${plain} Enable Firewall (plain)"
-    echo -e "${green}\t6.${plain} ${red}Disable${plain} Firewall"
-    echo -e "${green}\t7.${plain} Firewall Status"
-    echo -e "${green}\t8.${plain} Sync Node Ports (allow newly added inbound ports)"
-    echo -e "${green}\t0.${plain} Back to Main Menu"
-    read -rp "Choose an option: " choice
+    echo -e "${green}防火墙管理${plain}  (后端: ${backend:-${red}无${plain}})"
+    echo -e "${green}\t1.${plain} 安装防火墙 (ufw/firewalld)"
+    echo -e "${green}\t2.${plain} ${green}一键安全开启${plain} (自动放行 SSH + 面板 + 全部节点端口)"
+    echo -e "${green}\t3.${plain} ${green}放行${plain} 自定义端口"
+    echo -e "${green}\t4.${plain} ${red}删除${plain} 端口"
+    echo -e "${green}\t5.${plain} 启用防火墙 (常规)"
+    echo -e "${green}\t6.${plain} ${red}禁用${plain} 防火墙"
+    echo -e "${green}\t7.${plain} 查看防火墙状态"
+    echo -e "${green}\t8.${plain} 同步节点端口 (放行新加入站端口)"
+    echo -e "${green}\t0.${plain} 返回主菜单"
+    read -rp "请选择选项: " choice
     case "$choice" in
         0)
             show_menu
@@ -1297,7 +1297,7 @@ firewall_menu() {
             firewall_menu
             ;;
         *)
-            echo -e "${red}Invalid option. Please select a valid number.${plain}\n"
+            echo -e "${red}选项无效，请选择正确的数字。${plain}\n"
             firewall_menu
             ;;
     esac
@@ -2381,24 +2381,24 @@ ip_validation() {
 }
 
 iplimit_main() {
-    echo -e "\n${green}\t1.${plain} Install Fail2ban and configure IP Limit"
-    echo -e "${green}\t2.${plain} Change Ban Duration"
-    echo -e "${green}\t3.${plain} Unban Everyone"
-    echo -e "${green}\t4.${plain} Ban Logs"
-    echo -e "${green}\t5.${plain} Ban an IP Address"
-    echo -e "${green}\t6.${plain} Unban an IP Address"
-    echo -e "${green}\t7.${plain} Real-Time Logs"
-    echo -e "${green}\t8.${plain} Service Status"
-    echo -e "${green}\t9.${plain} Service Restart"
-    echo -e "${green}\t10.${plain} Uninstall Fail2ban and IP Limit"
-    echo -e "${green}\t0.${plain} Back to Main Menu"
-    read -rp "Choose an option: " choice
+    echo -e "\n${green}\t1.${plain} 安装 Fail2ban 并配置 IP 限制"
+    echo -e "${green}\t2.${plain} 修改封禁时长"
+    echo -e "${green}\t3.${plain} 解封全部 IP"
+    echo -e "${green}\t4.${plain} 封禁日志"
+    echo -e "${green}\t5.${plain} 手动封禁 IP"
+    echo -e "${green}\t6.${plain} 手动解封 IP"
+    echo -e "${green}\t7.${plain} 实时日志"
+    echo -e "${green}\t8.${plain} 服务状态"
+    echo -e "${green}\t9.${plain} 重启服务"
+    echo -e "${green}\t10.${plain} 卸载 Fail2ban 和 IP 限制"
+    echo -e "${green}\t0.${plain} 返回主菜单"
+    read -rp "请选择选项: " choice
     case "$choice" in
         0)
             show_menu
             ;;
         1)
-            confirm "Proceed with installation of Fail2ban & IP Limit?" "y"
+            confirm "是否安装 Fail2ban 并配置 IP 限制？" "y"
             if [[ $? == 0 ]]; then
                 install_iplimit
             else
@@ -2406,7 +2406,7 @@ iplimit_main() {
             fi
             ;;
         2)
-            read -rp "Please enter new Ban Duration in Minutes [default 30]: " NUM
+            read -rp "请输入新的封禁时长（分钟）[默认 30]: " NUM
             if [[ $NUM =~ ^[0-9]+$ ]]; then
                 create_iplimit_jails ${NUM}
                 if [[ $release == "alpine" ]]; then
@@ -2415,19 +2415,19 @@ iplimit_main() {
                     systemctl restart fail2ban
                 fi
             else
-                echo -e "${red}${NUM} is not a number! Please, try again.${plain}"
+                echo -e "${red}${NUM} 不是有效数字！请重试。${plain}"
             fi
             iplimit_main
             ;;
         3)
-            confirm "Proceed with Unbanning everyone from IP Limit jail?" "y"
+            confirm "是否解封 IP 限制监狱中的所有用户？" "y"
             if [[ $? == 0 ]]; then
                 fail2ban-client reload --restart --unban 3x-ipl
                 truncate -s 0 "${iplimit_banned_log_path}"
-                echo -e "${green}All users Unbanned successfully.${plain}"
+                echo -e "${green}所有用户已解封。${plain}"
                 iplimit_main
             else
-                echo -e "${yellow}Cancelled.${plain}"
+                echo -e "${yellow}已取消。${plain}"
             fi
             iplimit_main
             ;;
@@ -2436,24 +2436,24 @@ iplimit_main() {
             iplimit_main
             ;;
         5)
-            read -rp "Enter the IP address you want to ban: " ban_ip
+            read -rp "请输入要封禁的 IP 地址: " ban_ip
             ip_validation
             if [[ $ban_ip =~ $ipv4_regex || $ban_ip =~ $ipv6_regex ]]; then
                 fail2ban-client set 3x-ipl banip "$ban_ip"
-                echo -e "${green}IP Address ${ban_ip} has been banned successfully.${plain}"
+                echo -e "${green}IP 地址 ${ban_ip} 已成功封禁。${plain}"
             else
-                echo -e "${red}Invalid IP address format! Please try again.${plain}"
+                echo -e "${red}IP 地址格式无效！请重试。${plain}"
             fi
             iplimit_main
             ;;
         6)
-            read -rp "Enter the IP address you want to unban: " unban_ip
+            read -rp "请输入要解封的 IP 地址: " unban_ip
             ip_validation
             if [[ $unban_ip =~ $ipv4_regex || $unban_ip =~ $ipv6_regex ]]; then
                 fail2ban-client set 3x-ipl unbanip "$unban_ip"
-                echo -e "${green}IP Address ${unban_ip} has been unbanned successfully.${plain}"
+                echo -e "${green}IP 地址 ${unban_ip} 已成功解封。${plain}"
             else
-                echo -e "${red}Invalid IP address format! Please try again.${plain}"
+                echo -e "${red}IP 地址格式无效！请重试。${plain}"
             fi
             iplimit_main
             ;;
@@ -2478,7 +2478,7 @@ iplimit_main() {
             iplimit_main
             ;;
         *)
-            echo -e "${red}Invalid option. Please select a valid number.${plain}\n"
+            echo -e "${red}选项无效，请选择正确的数字。${plain}\n"
             iplimit_main
             ;;
     esac
@@ -3608,73 +3608,73 @@ migrate_db_prompt() {
 
 show_usage() {
     echo -e "┌────────────────────────────────────────────────────────────────┐
-│  ${blue}x-ui control menu usages (subcommands):${plain}                       │
+│  ${blue}x-ui 控制菜单用法（子命令）:${plain}                               │
 │                                                                │
-│  ${blue}x-ui${plain}                       - Admin Management Script          │
-│  ${blue}x-ui start${plain}                 - Start                            │
-│  ${blue}x-ui stop${plain}                  - Stop                             │
-│  ${blue}x-ui restart${plain}               - Restart                          │
-|  ${blue}x-ui restart-xray${plain}          - Restart Xray                     │
-│  ${blue}x-ui status${plain}                - Current Status                   │
-│  ${blue}x-ui settings${plain}              - Current Settings                 │
-│  ${blue}x-ui enable${plain}                - Enable Autostart on OS Startup   │
-│  ${blue}x-ui disable${plain}               - Disable Autostart on OS Startup  │
-│  ${blue}x-ui log${plain}                   - Check logs                       │
-│  ${blue}x-ui banlog${plain}                - Check Fail2ban ban logs          │
-│  ${blue}x-ui update${plain}                - Update                           │
-│  ${blue}x-ui update-dev${plain}            - Update to Dev channel (latest)   │
-│  ${blue}x-ui update-all-geofiles${plain}   - Update all geo files             │
-│  ${blue}x-ui migrateDB [file]${plain}      - Convert .db <-> .dump (SQLite)   │
-│  ${blue}x-ui pgclient [ver]${plain}        - Upgrade pg_dump/pg_restore tools │
-│  ${blue}x-ui legacy${plain}                - Legacy version                   │
-│  ${blue}x-ui install${plain}               - Install                          │
-│  ${blue}x-ui uninstall${plain}             - Uninstall                        │
+│  ${blue}x-ui${plain}                       - 管理脚本                      │
+│  ${blue}x-ui start${plain}                 - 启动面板                    │
+│  ${blue}x-ui stop${plain}                  - 停止面板                    │
+│  ${blue}x-ui restart${plain}               - 重启面板                    │
+|  ${blue}x-ui restart-xray${plain}          - 重启 Xray                   │
+│  ${blue}x-ui status${plain}                - 查看状态                    │
+│  ${blue}x-ui settings${plain}              - 查看设置                    │
+│  ${blue}x-ui enable${plain}                - 启用开机自启                │
+│  ${blue}x-ui disable${plain}               - 禁用开机自启                │
+│  ${blue}x-ui log${plain}                   - 查看日志                    │
+│  ${blue}x-ui banlog${plain}                - 查看 Fail2ban 封禁日志      │
+│  ${blue}x-ui update${plain}                - 更新                       │
+│  ${blue}x-ui update-dev${plain}            - 更新到开发版（最新提交）    │
+│  ${blue}x-ui update-all-geofiles${plain}   - 更新所有 Geo 文件           │
+│  ${blue}x-ui migrateDB [file]${plain}      - 转换 .db <-> .dump (SQLite) │
+│  ${blue}x-ui pgclient [ver]${plain}        - 升级 pg_dump/pg_restore   │
+│  ${blue}x-ui legacy${plain}                - 旧版本                     │
+│  ${blue}x-ui install${plain}               - 安装                       │
+│  ${blue}x-ui uninstall${plain}             - 卸载                       │
 └────────────────────────────────────────────────────────────────┘"
 }
 
 show_menu() {
     echo -e "
 ╔────────────────────────────────────────────────╗
-│  ${green}3X-UI Panel Management Script${plain}                │
-│  ${green}0.${plain} Exit Script                               │
+│  ${green}3X-UI 面板管理脚本${plain}                           │
+│  ${green}0.${plain} 退出脚本                               │
 │────────────────────────────────────────────────│
-│  ${green}1.${plain} Install                                   │
-│  ${green}2.${plain} Update                                    │
-│  ${green}3.${plain} Update to Dev Channel (latest commit)     │
-│  ${green}4.${plain} View Panel Settings                       │
-│  ${green}5.${plain} Legacy Version                            │
-│  ${green}6.${plain} Uninstall                                 │
+│  ${green}1.${plain} 安装                                     │
+│  ${green}2.${plain} 更新                                     │
+│  ${green}3.${plain} 更新到开发通道（最新提交）               │
+│  ${green}4.${plain} 查看面板设置                             │
+│  ${green}5.${plain} 旧版本                                   │
+│  ${green}6.${plain} 卸载                                     │
 │────────────────────────────────────────────────│
-│  ${green}7.${plain} Reset Username & Password                 │
-│  ${green}8.${plain} Reset Web Base Path                       │
-│  ${green}9.${plain} Reset Settings                            │
-│  ${green}10.${plain} Change Port                              │
-│  ${green}11.${plain} Update Menu                              │
+│  ${green}7.${plain} 重置用户名和密码                         │
+│  ${green}8.${plain} 重置 Web 基础路径                        │
+│  ${green}9.${plain} 重置设置                                 │
+│  ${green}10.${plain} 修改端口                                │
+│  ${green}11.${plain} 更新菜单脚本                            │
 │────────────────────────────────────────────────│
-│  ${green}12.${plain} Start                                    │
-│  ${green}13.${plain} Stop                                     │
-│  ${green}14.${plain} Restart                                  │
-|  ${green}15.${plain} Restart Xray                             │
-│  ${green}16.${plain} Check Status                             │
-│  ${green}17.${plain} Logs Management                          │
+│  ${green}12.${plain} 启动                                    │
+│  ${green}13.${plain} 停止                                    │
+│  ${green}14.${plain} 重启                                    │
+|  ${green}15.${plain} 重启 Xray                               │
+│  ${green}16.${plain} 查看状态                                │
+│  ${green}17.${plain} 日志管理                                │
 │────────────────────────────────────────────────│
-│  ${green}18.${plain} Enable Autostart                         │
-│  ${green}19.${plain} Disable Autostart                        │
+│  ${green}18.${plain} 启用开机自启                            │
+│  ${green}19.${plain} 禁用开机自启                            │
 │────────────────────────────────────────────────│
-│  ${green}20.${plain} SSL Certificate Management               │
-│  ${green}21.${plain} Cloudflare SSL Certificate               │
-│  ${green}22.${plain} IP Limit Management                      │
-│  ${green}23.${plain} Firewall Management                      │
-│  ${green}24.${plain} SSH Port Forwarding Management           │
-│  ${green}25.${plain} PostgreSQL Management                    │
+│  ${green}20.${plain} SSL 证书管理                            │
+│  ${green}21.${plain} Cloudflare SSL 证书                     │
+│  ${green}22.${plain} IP 限制管理                             │
+│  ${green}23.${plain} 防火墙管理                              │
+│  ${green}24.${plain} SSH 端口转发管理                        │
+│  ${green}25.${plain} PostgreSQL 管理                         │
 │────────────────────────────────────────────────│
-│  ${green}26.${plain} Enable BBR                               │
-│  ${green}27.${plain} Update Geo Files                         │
-│  ${green}28.${plain} Speedtest by Ookla                       │
+│  ${green}26.${plain} 启用 BBR                                │
+│  ${green}27.${plain} 更新 Geo 文件                           │
+│  ${green}28.${plain} Ookla 测速                              │
 ╚────────────────────────────────────────────────╝
 "
     show_status
-    echo && read -rp "Please enter your selection [0-28]: " num
+    echo && read -rp "请输入选项 [0-28]: " num
 
     case "${num}" in
         0)
@@ -3765,7 +3765,7 @@ show_menu() {
             run_speedtest
             ;;
         *)
-            LOGE "Please enter the correct number [0-28]"
+            LOGE "请输入正确的数字 [0-28]"
             ;;
     esac
 }

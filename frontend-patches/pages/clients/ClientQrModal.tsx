@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Collapse, Modal, Spin, Tag } from 'antd';
-import { HttpUtil } from '@/utils';
+import { Button, Collapse, Modal, Spin, Tag } from 'antd';
+import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
+import { HttpUtil, ClipboardManager } from '@/utils';
 import { isPostQuantumLink } from '@/lib/xray/inbound-link';
 import { LinkTags, linkMetaText, parseLinkParts } from '@/lib/xray/link-label';
 import { QrPanel } from '@/pages/inbounds/qr';
@@ -30,6 +31,29 @@ interface ApiMsg<T = unknown> {
 }
 
 const DEFAULT_SUB: SubSettings = { enable: false, subURI: '', subJsonURI: '', subJsonEnable: false, publicHost: '' };
+const ACTIVE_KEY_STORAGE = 'clientQrModal_activeKey';
+
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const ok = await ClipboardManager.copyText(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }, [text]);
+  return (
+    <Button
+      type="text"
+      size="small"
+      icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+      onClick={handleCopy}
+      style={{ marginLeft: 8, opacity: 0.7 }}
+      title={copied ? '已复制' : '复制'}
+    />
+  );
+}
 
 export default function ClientQrModal({
   open,
@@ -90,29 +114,11 @@ export default function ClientQrModal({
 
   const [activeKey, setActiveKey] = useState<string[]>([]);
 
+  // Build items: links first, then subscriptions
   const items = useMemo(() => {
-    const out: { key: string; label: React.ReactNode; children: React.ReactNode }[] = [];
-    if (subLink) {
-      out.push({
-        key: 'sub',
-        label: t('subscription.title'),
-        children: <QrPanel value={subLink} remark={`${client?.email || ''} — ${t('subscription.title')}`} />,
-      });
-    }
-    if (subJsonLink) {
-      out.push({
-        key: 'subJson',
-        label: `${t('subscription.title')} (JSON)`,
-        children: <QrPanel value={subJsonLink} remark={`${client?.email || ''} — JSON`} />,
-      });
-    }
-    if (subClashLink) {
-      out.push({
-        key: 'subClash',
-        label: `Clash ${t('subscription.title')}`,
-        children: <QrPanel value={subClashLink} remark={`${client?.email || ''} — Clash`} />,
-      });
-    }
+    const out: { key: string; label: React.ReactNode; children: React.ReactNode; copyText: string }[] = [];
+
+    // 1. Direct links (vless/vmess/trojan/...) — shown first
     links.forEach((link, idx) => {
       const parts = parseLinkParts(link);
       const meta = parts ? linkMetaText(parts) : '';
@@ -124,7 +130,12 @@ export default function ClientQrModal({
       ) : `${t('pages.clients.link')} ${idx + 1}`;
       out.push({
         key: `l${idx}`,
-        label,
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{label}</span>
+            <CopyBtn text={link} />
+          </div>
+        ),
         children: (
           <QrPanel
             value={link}
@@ -132,12 +143,20 @@ export default function ClientQrModal({
             showQr={!isPostQuantumLink(link)}
           />
         ),
+        copyText: link,
       });
     });
+
+    // 2. Wireguard config
     if (wgConfigText) {
       out.push({
         key: 'wg-config',
-        label: <Tag color="cyan" style={{ margin: 0 }}>{t('pages.clients.wireguardConfig')}</Tag>,
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Tag color="cyan" style={{ margin: 0 }}>{t('pages.clients.wireguardConfig')}</Tag>
+            <CopyBtn text={wgConfigText} />
+          </div>
+        ),
         children: (
           <QrPanel
             value={wgConfigText}
@@ -145,18 +164,84 @@ export default function ClientQrModal({
             downloadName={`${client?.email || 'peer'}.conf`}
           />
         ),
+        copyText: wgConfigText,
       });
     }
+
+    // 3. Subscription links
+    if (subLink) {
+      out.push({
+        key: 'sub',
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{t('subscription.title')}</span>
+            <CopyBtn text={subLink} />
+          </div>
+        ),
+        children: <QrPanel value={subLink} remark={`${client?.email || ''} — ${t('subscription.title')}`} />,
+        copyText: subLink,
+      });
+    }
+    if (subJsonLink) {
+      out.push({
+        key: 'subJson',
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{`${t('subscription.title')} (JSON)`}</span>
+            <CopyBtn text={subJsonLink} />
+          </div>
+        ),
+        children: <QrPanel value={subJsonLink} remark={`${client?.email || ''} — JSON`} />,
+        copyText: subJsonLink,
+      });
+    }
+    if (subClashLink) {
+      out.push({
+        key: 'subClash',
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{`Clash ${t('subscription.title')}`}</span>
+            <CopyBtn text={subClashLink} />
+          </div>
+        ),
+        children: <QrPanel value={subClashLink} remark={`${client?.email || ''} — Clash`} />,
+        copyText: subClashLink,
+      });
+    }
+
     return out;
   }, [subLink, subJsonLink, subClashLink, wgConfigText, links, client?.email, t]);
 
+  // Restore activeKey from localStorage on open; default to first item
   useEffect(() => {
     if (!open) {
       setActiveKey([]);
       return;
     }
+    try {
+      const saved = localStorage.getItem(ACTIVE_KEY_STORAGE);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const validKeys = new Set(items.map(i => i.key));
+          const filtered = parsed.filter((k: string) => validKeys.has(k));
+          if (filtered.length > 0) {
+            setActiveKey(filtered);
+            return;
+          }
+        }
+      }
+    } catch { /* ignore */ }
     setActiveKey(items.length > 0 ? [items[0].key] : []);
   }, [open, items]);
+
+  const handleChange = useCallback((keys: string | string[]) => {
+    const next = typeof keys === 'string' ? [keys] : (keys as string[]);
+    setActiveKey(next);
+    try {
+      localStorage.setItem(ACTIVE_KEY_STORAGE, JSON.stringify(next));
+    } catch { /* ignore */ }
+  }, []);
 
   return (
     <Modal
@@ -177,8 +262,8 @@ export default function ClientQrModal({
         {hasAnything && (
           <Collapse
             activeKey={activeKey}
-            onChange={(keys) => setActiveKey(typeof keys === 'string' ? [keys] : (keys as string[]))}
-            items={items}
+            onChange={handleChange}
+            items={items.map(({ key, label, children }) => ({ key, label, children }))}
           />
         )}
       </Spin>
