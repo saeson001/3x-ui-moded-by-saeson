@@ -9,6 +9,11 @@ import {
 
 import { HttpUtil } from '@/utils';
 
+// 上游 axios 全局默认 Content-Type 是 x-www-form-urlencoded，
+// 不显式声明 JSON 的话请求体会被 qs.stringify 编码成 "port=xxx&action=add"，
+// 后端按 JSON 解析直接报错。所有 POST 必须带上这个头。
+const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
+
 interface FirewallStatus {
   backend: string;
   backendFound: boolean;
@@ -42,7 +47,7 @@ export default function SaesonFirewallCard() {
   const doEnable = async () => {
     setBusy(true);
     try {
-      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/enable', {});
+      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/enable', {}, JSON_HEADERS);
       if (res?.success && res.obj) {
         setStatus(res.obj);
         message.success('防火墙已开启：仅放行 SSH / 面板 / 节点 / 自定义端口');
@@ -57,7 +62,7 @@ export default function SaesonFirewallCard() {
   const doDisable = async () => {
     setBusy(true);
     try {
-      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/disable', {});
+      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/disable', {}, JSON_HEADERS);
       if (res?.success && res.obj) {
         setStatus(res.obj);
         message.success('防火墙已关闭');
@@ -72,7 +77,7 @@ export default function SaesonFirewallCard() {
   const doSync = async () => {
     setBusy(true);
     try {
-      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/sync', {});
+      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/sync', {}, JSON_HEADERS);
       if (res?.success && res.obj) {
         setStatus(res.obj);
         message.success('端口已同步（新增节点端口已放行）');
@@ -87,10 +92,11 @@ export default function SaesonFirewallCard() {
   const doPortAction = async (port: number, action: 'add' | 'remove') => {
     setBusy(true);
     try {
-      const res = await HttpUtil.post<FirewallStatus>('/panel/api/firewall/ports', {
-        port,
-        action,
-      });
+      const res = await HttpUtil.post<FirewallStatus>(
+        '/panel/api/firewall/ports',
+        { port, action },
+        JSON_HEADERS
+      );
       if (res?.success && res.obj) {
         setStatus(res.obj);
         setNewPort(null);

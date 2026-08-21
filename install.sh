@@ -294,13 +294,61 @@ EOF
 
 # --- 配置面板 ---
 configure_panel() {
+    local server_ip=$(get_server_ip)
+
+    # 已有面板数据（更新/重装场景）：保留原有账号/端口/基础路径不变，
+    # 绝不随机覆盖（否则用户会被锁在外面找不到新地址）
+    if [[ -f /etc/x-ui/x-ui.db ]]; then
+        echo -e "${yellow}检测到已有面板数据，保留原有账号/端口/基础路径不变${plain}"
+
+        # 启动服务
+        if [[ "${release}" == "alpine" ]]; then
+            rc-service x-ui start
+        else
+            systemctl start x-ui
+        fi
+        sleep 2
+
+        # 读取现有配置并展示
+        local info=$(${xui_folder}/x-ui setting -show true 2>/dev/null || echo "")
+        local cur_port=$(echo "$info" | grep -Eo 'port: .+' | awk '{print $2}')
+        local cur_path=$(echo "$info" | grep -Eo 'webBasePath: .+' | awk '{print $2}')
+        local cur_user=""
+        command -v sqlite3 > /dev/null 2>&1 && cur_user=$(sqlite3 /etc/x-ui/x-ui.db "SELECT username FROM users ORDER BY id LIMIT 1;" 2>/dev/null || echo "")
+
+        echo ""
+        echo -e "${green}================================================${plain}"
+        echo -e "${green}    3x-ui moded by saeson 更新完成！（配置已保留）${plain}"
+        echo -e "${green}================================================${plain}"
+        echo ""
+        echo -e "  面板地址: ${blue}http://${server_ip}:${cur_port:-2053}${cur_path:-/}${plain}"
+        echo -e "  用户名:   ${yellow}${cur_user:-admin}${plain}"
+        echo -e "  密码:     ${yellow}（沿用原密码，忘记可用 x-ui 菜单选项 7 重置）${plain}"
+        echo ""
+        echo -e "${green}================================================${plain}"
+        return 0
+    fi
+
+    # ---- 全新安装：交互式配置 ----
     local username=$(gen_random_string 8)
     local password=$(gen_random_string 12)
     local port=$((RANDOM % 55535 + 10000))
     local webBasePath=$(gen_random_string 8)
-    local server_ip=$(get_server_ip)
 
     echo -e "${green}配置面板参数...${plain}"
+
+    # 中文交互：是否自定义端口（直接回车 = 使用随机端口）
+    echo -e "面板默认使用随机端口 ${yellow}${port}${plain}（更安全，避免被扫描）"
+    read -rp "是否自定义面板端口? 直接输入端口号(1-65535)，或直接回车使用上面的随机端口: " custom_port
+    custom_port="${custom_port// /}"
+    if [[ -n "${custom_port}" ]]; then
+        if [[ "${custom_port}" =~ ^[0-9]+$ ]] && [[ "${custom_port}" -ge 1 ]] && [[ "${custom_port}" -le 65535 ]]; then
+            port="${custom_port}"
+            echo -e "${green}已使用自定义端口: ${port}${plain}"
+        else
+            echo -e "${yellow}端口无效，仍使用随机端口: ${port}${plain}"
+        fi
+    fi
 
     # 设置面板参数
     ${xui_folder}/x-ui setting -username "${username}" >/dev/null 2>&1
@@ -704,17 +752,17 @@ do_install() {
     # 4. 应用 Reality 修复
     apply_reality_fix
 
-    # 5. 获取面板端口
+    # 5. 配置面板（全新安装时含端口自定义交互；已有数据则保留原配置）
+    configure_panel
+
+    # 6. 获取面板端口（此时端口已最终确定）
     local panel_port=$(get_latest_version >/dev/null 2>&1; ${xui_folder}/x-ui setting -show true 2>/dev/null | grep 'port:' | awk -F: '{print $2}' | tr -d ' ')
     if [[ -z "${panel_port}" ]]; then
         panel_port=2053
     fi
 
-    # 6. 配置防火墙
+    # 7. 配置防火墙（放行最终确定的面板端口）
     configure_firewall "${panel_port}"
-
-    # 7. 配置面板
-    configure_panel
 
     # 8. 显示完成信息
     echo -e "${green}安装完成！使用 x-ui 命令打开管理菜单。${plain}"
