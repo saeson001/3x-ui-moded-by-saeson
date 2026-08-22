@@ -56,6 +56,7 @@ jobs:
           cp scripts/inject_reality_fix.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_clash_link.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_saeson_routes.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
+          cp scripts/inject_xray_versions.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           # Save our custom x-ui.sh (with Clash Link info in option 4)
           cp x-ui.sh /tmp/saeson-mod/ 2>/dev/null || true
 
@@ -76,6 +77,7 @@ jobs:
           cp /tmp/saeson-mod/scripts/inject_reality_fix.py scripts/
           cp /tmp/saeson-mod/scripts/inject_clash_link.py scripts/
           cp /tmp/saeson-mod/scripts/inject_saeson_routes.py scripts/
+          cp /tmp/saeson-mod/scripts/inject_xray_versions.py scripts/
           # Restore custom x-ui.sh
           cp /tmp/saeson-mod/x-ui.sh . 2>/dev/null || true
 
@@ -116,6 +118,11 @@ jobs:
         run: |
           python3 scripts/inject_saeson_routes.py . .
           echo "Saeson netstats + firewall injection complete"
+
+      - name: Inject Xray version list patch
+        run: |
+          python3 scripts/inject_xray_versions.py internal/web/service/server.go
+          echo "Xray version list patch injected"
 
       - name: Setup Go
         uses: actions/setup-go@v5
