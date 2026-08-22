@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   ConfigProvider,
   Layout,
   message,
@@ -60,6 +61,9 @@ const XrayMetricsModal = lazy(() => import('./XrayMetricsModal'));
 const XrayLogModal = lazy(() => import('./XrayLogModal'));
 const VersionModal = lazy(() => import('./VersionModal'));
 import './IndexPage.css';
+
+// saeson mod version, injected at build time (see build.yml)
+const SAESON_MOD_VERSION = '__SAESON_MOD_VERSION__';
 
 export default function IndexPage() {
   const { t } = useTranslation();
@@ -231,47 +235,9 @@ export default function IndexPage() {
                     />
                   </Col>
 
-                  <Col xs={24} lg={12}>
-                    <Card
-                      title={
-                        <Space>
-                          <span>3X-UI</span>
-                          {isMobile && displayVersion && (
-                            <Tag color={panelUpdateInfo.updateAvailable ? 'orange' : 'green'}>
-                              {panelUpdateInfo.updateAvailable
-                                ? formatPanelVersion(panelUpdateInfo.latestVersion)
-                                : formatPanelVersion(displayVersion)}
-                            </Tag>
-                          )}
-                        </Space>
-                      }
-                      hoverable
-                      actions={[
-                        <Space className="action" key="tg" role="button" tabIndex={0} aria-label="@XrayUI" onClick={openTelegram} onKeyDown={activateOnKey(openTelegram)}>
-                          <TelegramFilled className="tg-icon" aria-hidden="true" />
-                          {!isMobile && <span>@XrayUI</span>}
-                        </Space>,
-                        <Space
-                          key="panel-version"
-                          className={`action ${panelUpdateInfo.updateAvailable ? 'action-update' : ''}`}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={t('pages.index.updatePanel')}
-                          onClick={openPanelVersion}
-                          onKeyDown={activateOnKey(openPanelVersion)}
-                        >
-                          <CloudDownloadOutlined />
-                          {!isMobile && (
-                            <span>
-                              {panelUpdateInfo.updateAvailable
-                                ? `${t('update')} ${formatPanelVersion(panelUpdateInfo.latestVersion)}`
-                                : formatPanelVersion(displayVersion)}
-                            </span>
-                          )}
-                        </Space>,
-                      ]}
-                    />
-                  </Col>
+                  {/* saeson mod v1.3.7: 3X-UI panel card moved to the bottom of the
+                      dashboard (collapsed by default) to avoid misclicks on the
+                      official-upstream update button */}
 
                   <Col xs={24} lg={12}>
                     <Card
@@ -464,6 +430,65 @@ export default function IndexPage() {
                         </Col>
                       </Row>
                     </Card>
+                  </Col>
+
+                  {/* saeson mod v1.3.7: 3X-UI panel card (Telegram / panel update),
+                      kept at the very bottom and collapsed by default */}
+                  <Col span={24}>
+                    <Collapse
+                      items={[
+                        {
+                          key: 'panel',
+                          label: (
+                            <Space>
+                              <CloudDownloadOutlined />
+                              <span>3X-UI</span>
+                              <Tag color="geekblue">saeson {SAESON_MOD_VERSION}</Tag>
+                              {panelUpdateInfo.updateAvailable && (
+                                <Tag color="orange">
+                                  {t('update')} {formatPanelVersion(panelUpdateInfo.latestVersion)}
+                                </Tag>
+                              )}
+                            </Space>
+                          ),
+                          children: (
+                            <Card
+                              title={
+                                <Space>
+                                  <span>3X-UI</span>
+                                  <Tag color="green">{formatPanelVersion(displayVersion)}</Tag>
+                                </Space>
+                              }
+                              hoverable
+                              actions={[
+                                <Space className="action" key="tg" role="button" tabIndex={0} aria-label="@XrayUI" onClick={openTelegram} onKeyDown={activateOnKey(openTelegram)}>
+                                  <TelegramFilled className="tg-icon" aria-hidden="true" />
+                                  {!isMobile && <span>@XrayUI</span>}
+                                </Space>,
+                                <Space
+                                  key="panel-version"
+                                  className={`action ${panelUpdateInfo.updateAvailable ? 'action-update' : ''}`}
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-label={t('pages.index.updatePanel')}
+                                  onClick={openPanelVersion}
+                                  onKeyDown={activateOnKey(openPanelVersion)}
+                                >
+                                  <CloudDownloadOutlined />
+                                  {!isMobile && (
+                                    <span>
+                                      {panelUpdateInfo.updateAvailable
+                                        ? `${t('update')} ${formatPanelVersion(panelUpdateInfo.latestVersion)}`
+                                        : formatPanelVersion(displayVersion)}
+                                    </span>
+                                  )}
+                                </Space>,
+                              ]}
+                            />
+                          ),
+                        },
+                      ]}
+                    />
                   </Col>
                 </Row>
               )}

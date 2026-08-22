@@ -91,7 +91,18 @@ jobs:
             cp -f frontend-patches/pages/index/SaesonFirewallCard.tsx frontend/src/pages/index/SaesonFirewallCard.tsx
             # saeson v1.3.4: inbound list column widths + centered headers
             cp -f frontend-patches/pages/inbounds/list/useInboundColumns.tsx frontend/src/pages/inbounds/list/useInboundColumns.tsx
-            echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall + inbound columns)"
+            # saeson v1.3.7: sidebar version badge -> fork repo + mod version;
+            # panel update modal warning (official updater would overwrite the fork)
+            cp -f frontend-patches/layouts/AppSidebar.tsx frontend/src/layouts/AppSidebar.tsx
+            cp -f frontend-patches/pages/index/PanelUpdateModal.tsx frontend/src/pages/index/PanelUpdateModal.tsx
+            # saeson v1.3.7: inject mod version (from VERSION file) into patched files
+            MOD_VER="$(cat VERSION)"
+            sed -i "s/__SAESON_MOD_VERSION__/${MOD_VER}/g" \
+              frontend/src/layouts/AppSidebar.tsx \
+              frontend/src/pages/index/IndexPage.tsx \
+              frontend/src/pages/index/PanelUpdateModal.tsx
+            echo "saeson mod version injected: ${MOD_VER}"
+            echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall + inbound columns + fork version branding)"
           fi
 
           echo "Build directory prepared with clash_link + netstats + firewall modules"
@@ -262,6 +273,12 @@ jobs:
           name: "3x-ui moded by saeson ${{ github.ref_name }}"
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
+
+            ### v1.3.7 更新
+            - **版本显示区分**: 侧边栏底部版本徽章改为 fork 版本号并链接到 saeson 仓库（悬停显示上游基线版本）；仪表盘 3X-UI 卡片移至最底部且默认折叠；面板更新弹窗顶部增加红色警告（官方更新器会覆盖修改版）并显示 saeson mod 版本
+
+            ### v1.3.6 更新
+            - **Xray 版本切换列表扩展**: 面板内可切换的 Xray 版本从 3 个扩展到约 29 个（一年内全部版本，v25.8.29 ~ v26.7.28，含 v26.3.27）
 
             ### v1.3.5 更新
             - **列宽微调**: 入站列表流量列/速度列从 24 字符宽度收紧到 20 字符宽度（208px → 170px），其余列保持不变
