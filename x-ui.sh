@@ -1065,6 +1065,52 @@ show_mtproto_status() {
     done
 }
 
+# --- 版本信息 (saeson mod: x-ui version 子命令) ---
+show_version() {
+    echo -e "${blue}==================== 版本信息 ====================${plain}"
+    echo ""
+
+    # 面板版本（编译时 ldflags 注入二进制，x-ui -v 读取）
+    local current_version=""
+    if [[ -x "${xui_folder}/x-ui" ]]; then
+        current_version=$(${xui_folder}/x-ui -v 2>/dev/null | head -n1 | tr -d '[:space:]')
+    fi
+    echo -e "  面板当前版本: ${green}${current_version:-未知}${plain}"
+
+    # Xray 内核版本（xray 二进制自报）
+    local xray_bin="" xray_version=""
+    xray_bin=$(ls "${xui_folder}"/bin/xray-linux-* 2>/dev/null | head -n1)
+    if [[ -n "${xray_bin}" && -x "${xray_bin}" ]]; then
+        xray_version=$("${xray_bin}" version 2>/dev/null | head -n1 | awk '{print $2}')
+    fi
+    echo -e "  Xray 当前版本: ${green}${xray_version:-未知}${plain}"
+
+    # 最新版本（GitHub API，网络不通或超时则显示获取失败，不影响本地版本显示）
+    local latest_panel="" latest_xray=""
+    latest_panel=$(curl -4fsSL --max-time 10 "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null \
+        | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    latest_xray=$(curl -4fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
+        | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    echo -e "  面板最新版本: ${green}${latest_panel:-获取失败}${plain}"
+    echo -e "  Xray 最新版本: ${green}${latest_xray:-获取失败}${plain}"
+    echo -e "  仓库:         ${green}${REPO_OWNER}/${REPO_NAME}${plain}"
+    echo ""
+    echo -e "${blue}================================================${plain}"
+
+    if [[ -n "${latest_panel}" && -n "${current_version}" && "${current_version}" != "${latest_panel}" ]]; then
+        echo -e "${yellow}面板有新版本 ${latest_panel}，可运行 x-ui update 更新。${plain}"
+    elif [[ -n "${current_version}" && -n "${latest_panel}" ]]; then
+        echo -e "${green}面板已是最新版本。${plain}"
+    fi
+    if [[ -n "${latest_xray}" && -n "${xray_version}" && "v${xray_version}" != "${latest_xray}" ]]; then
+        echo -e "${yellow}Xray 内核有新版本 ${latest_xray}（当前 ${xray_version}），可在面板首页版本弹窗中切换。${plain}"
+    fi
+
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
+}
+
 # --- Firewall Management (saeson mod: multi-backend + auto port discovery) ---
 
 detect_fw_backend() {
@@ -3616,6 +3662,7 @@ show_usage() {
 │  ${blue}x-ui restart${plain}               - 重启面板                    │
 |  ${blue}x-ui restart-xray${plain}          - 重启 Xray                   │
 │  ${blue}x-ui status${plain}                - 查看状态                    │
+│  ${blue}x-ui version${plain}               - 查看版本（面板/Xray）       │
 │  ${blue}x-ui settings${plain}              - 查看设置                    │
 │  ${blue}x-ui enable${plain}                - 启用开机自启                │
 │  ${blue}x-ui disable${plain}               - 禁用开机自启                │
@@ -3671,10 +3718,11 @@ show_menu() {
 │  ${green}26.${plain} 启用 BBR                                │
 │  ${green}27.${plain} 更新 Geo 文件                           │
 │  ${green}28.${plain} Ookla 测速                              │
+│  ${green}29.${plain} 查看版本信息                            │
 ╚────────────────────────────────────────────────╝
 "
     show_status
-    echo && read -rp "请输入选项 [0-28]: " num
+    echo && read -rp "请输入选项 [0-29]: " num
 
     case "${num}" in
         0)
@@ -3764,8 +3812,11 @@ show_menu() {
         28)
             run_speedtest
             ;;
+        29)
+            show_version
+            ;;
         *)
-            LOGE "请输入正确的数字 [0-28]"
+            LOGE "请输入正确的数字 [0-29]"
             ;;
     esac
 }
@@ -3786,6 +3837,9 @@ if [[ $# > 0 ]]; then
             ;;
         "status")
             check_install 0 && status 0
+            ;;
+        "version")
+            show_version 0
             ;;
         "settings")
             check_install 0 && check_config 0
