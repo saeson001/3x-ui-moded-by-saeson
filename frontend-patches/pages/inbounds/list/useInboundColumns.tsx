@@ -265,7 +265,7 @@ export function useInboundColumns({
         title: t('pages.inbounds.traffic'),
         key: 'traffic',
         align: 'center',
-        width: 208,
+        width: 170,
         render: (_, record) => (
           <Popover
             content={(
@@ -297,7 +297,7 @@ export function useInboundColumns({
         title: t('pages.inbounds.speed'),
         key: 'speed',
         align: 'center',
-        width: 208,
+        width: 170,
         render: (_, record) => {
           const speed = inboundSpeed[record.id];
           if (!isActiveSpeed(speed)) {
