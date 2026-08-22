@@ -87,7 +87,9 @@ jobs:
             cp -f frontend-patches/pages/index/IndexPage.tsx frontend/src/pages/index/IndexPage.tsx
             cp -f frontend-patches/pages/index/SaesonTrafficCard.tsx frontend/src/pages/index/SaesonTrafficCard.tsx
             cp -f frontend-patches/pages/index/SaesonFirewallCard.tsx frontend/src/pages/index/SaesonFirewallCard.tsx
-            echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall)"
+            # saeson v1.3.4: inbound list column widths + centered headers
+            cp -f frontend-patches/pages/inbounds/list/useInboundColumns.tsx frontend/src/pages/inbounds/list/useInboundColumns.tsx
+            echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall + inbound columns)"
           fi
 
           echo "Build directory prepared with clash_link + netstats + firewall modules"
@@ -253,6 +255,13 @@ jobs:
           name: "3x-ui moded by saeson ${{ github.ref_name }}"
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
+
+            ### v1.3.4 更新
+            - **入站列表列宽优化**: 所有列名居中显示；ID 列收紧到 5 位数字宽度，备注列 5 个汉字宽度（超长自动省略，悬停显示全名），端口列 5 位数字宽度，客户端列固定 8 字符宽度，流量/速度列固定 24 字符宽度
+            - **更新防挂死**: install.sh 所有下载命令增加连接超时（15 秒）、低速中止（<1KB/s 持续 60 秒）与自动重试（3 次），杜绝更新时服务已停止但下载无限挂起的问题
+
+            ### v1.3.3 更新
+            - **二维码弹窗记忆折叠**: 订阅类面板（订阅信息/订阅 JSON/Clash 订阅）不再记忆展开状态，重新打开时默认折叠，仅直链面板记忆上一次选择
 
             ### 新功能 (v1.3.0)
             - **流量构成区分**: 系统状态页新增「Xray 代理流量」与「系统流量（非代理）」卡片，与"整体速度"同款样式 —— 一眼看出 VPS 计费流量中多少走了代理、多少是 VPS 自身（SSH/扫描/其他服务）

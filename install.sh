@@ -23,7 +23,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.3.0"
+MOD_VERSION="v1.3.4"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -122,18 +122,29 @@ get_server_ip() {
 }
 
 # --- 下载文件 ---
+# v1.3.4: 加超时与重试，防止下载挂起导致服务停止后卡死（更新时服务已 stop）
+#   --connect-timeout 15  连接超时 15 秒
+#   --speed-limit 1024 --speed-time 60  速度低于 1KB/s 持续 60 秒即中止
+#   --retry 3 --retry-delay 2  失败自动重试 3 次
 download_file() {
     local output="$1" url="$2"
-    curl -4fsSLo "$output" "$url" || curl -fsSLo "$output" "$url"
+    curl -4fsSLo "$output" \
+        --connect-timeout 15 --speed-limit 1024 --speed-time 60 \
+        --retry 3 --retry-delay 2 \
+        "$url" \
+    || curl -fsSLo "$output" \
+        --connect-timeout 15 --speed-limit 1024 --speed-time 60 \
+        --retry 3 --retry-delay 2 \
+        "$url"
 }
 
 # --- 获取最新版本号 ---
 get_latest_version() {
     local ver=""
-    ver=$(curl -4fsSL "${GITHUB_API}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    ver=$(curl -4fsSL -m 15 "${GITHUB_API}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
     if [[ -z "${ver}" ]]; then
         # fallback: try upstream for binary
-        ver=$(curl -4fsSL "https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        ver=$(curl -4fsSL -m 15 "https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
     fi
     echo "${ver:-latest}"
 }
@@ -196,14 +207,16 @@ install_xui() {
     # 检查并下载缺失的 geo 数据文件（xray-core 路由必需）
     if [[ ! -f ${xui_folder}/bin/geoip.dat ]] || [[ ! -f ${xui_folder}/bin/geosite.dat ]]; then
         echo -e "${yellow}下载 xray-core geo 数据文件...${plain}"
-        local XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        local XRAY_VER=$(curl -s -m 15 https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
         if [[ -n "${XRAY_VER}" ]]; then
             # Download and extract just the dat files
             local geo_zip="${temp_dir}/xray-geo.zip"
             local xray_arch_flag="64"
             [[ "${XUI_ARCH}" == "arm64" ]] && xray_arch_flag="arm64-v8a"
             [[ "${XUI_ARCH}" == "armv7" ]] && xray_arch_flag="armv7a"
-            curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${xray_arch_flag}.zip" -o "${geo_zip}" 2>/dev/null
+            curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${xray_arch_flag}.zip" \
+                --connect-timeout 15 --speed-limit 1024 --speed-time 60 --retry 2 --retry-delay 2 \
+                -o "${geo_zip}" 2>/dev/null
             if [[ -f "${geo_zip}" ]]; then
                 unzip -o "${geo_zip}" geoip.dat geosite.dat -d "${xui_folder}/bin/" 2>/dev/null || true
                 rm -f "${geo_zip}"
