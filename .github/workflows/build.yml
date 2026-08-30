@@ -41,6 +41,7 @@ jobs:
           apt-get update -qq
           apt-get install -y -q git curl wget tar ca-certificates unzip python3 \
             gcc libc6-dev libsqlite3-dev pkg-config
+          git config --global --add safe.directory '*' || true
           echo "Container glibc: $(ldd --version | head -1)"
 
       - name: Checkout modified source
@@ -194,16 +195,8 @@ jobs:
           echo "=== Build complete ==="
           ls -lh x-ui
 
-          echo "=== GLIBC requirements (max version the binary needs) ==="
-          python3 - <<'PY'
-import re
-data = open('x-ui','rb').read()
-vers = set(re.findall(rb'GLIBC_(\d+\.\d+)', data))
-if vers:
-    print("max GLIBC required:", "GLIBC_" + max(vers))
-else:
-    print("no GLIBC version symbols found (static?)")
-PY
+          echo "=== Verify binary links against container glibc (Debian 11 / glibc 2.31) ==="
+          ldd x-ui | grep -E 'libc|libsqlite|not found' || true
 
       - name: Download xray-core
         run: |
