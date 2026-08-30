@@ -122,13 +122,14 @@ get_server_ip() {
 }
 
 # --- 下载文件 ---
-# v1.3.4: 加超时与重试，防止下载挂起导致服务停止后卡死（更新时服务已 stop）
+# v1.4.0: 去掉强制 IPv4（-4 会在 IPv6-only 的 VPS 上直接失败）；
+#         改为让 curl 自动选择协议，失败时再重试。严禁回退上游。
 #   --connect-timeout 15  连接超时 15 秒
 #   --speed-limit 1024 --speed-time 60  速度低于 1KB/s 持续 60 秒即中止
 #   --retry 3 --retry-delay 2  失败自动重试 3 次
 download_file() {
     local output="$1" url="$2"
-    curl -4fsSLo "$output" \
+    curl -fsSLo "$output" \
         --connect-timeout 15 --speed-limit 1024 --speed-time 60 \
         --retry 3 --retry-delay 2 \
         "$url" \
@@ -141,12 +142,18 @@ download_file() {
 # --- 获取最新版本号 ---
 get_latest_version() {
     local ver=""
-    ver=$(curl -4fsSL -m 15 "${GITHUB_API}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-    if [[ -z "${ver}" ]]; then
-        # fallback: try upstream for binary
-        ver=$(curl -4fsSL -m 15 "https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-    fi
-    echo "${ver:-latest}"
+    local attempt
+    for attempt in 1 2 3; do
+        ver=$(curl -fsSL -m 20 "${GITHUB_API}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        if [[ -n "${ver}" ]]; then
+            echo "${ver}"
+            return 0
+        fi
+        echo -e "${yellow}获取最新版本失败（第 ${attempt} 次），重试...${plain}" >&2
+        sleep 2
+    done
+    # 最后兜底：用脚本内置的 MOD_VERSION（保证永远能拿到我们自己的版本）
+    echo "${MOD_VERSION}"
 }
 
 # --- 安装 3x-ui ---
@@ -165,25 +172,33 @@ install_xui() {
     local pkg_url=""
     local download_success=0
 
-    # 优先从我们的编译版 release 下载（Go 源码级修复已内置）
+    # 只从我们自己的 fork 下载编译版（Go 源码级修复已内置）。
+    # ⚠️ 严禁静默回退到上游 MHSanaei/3x-ui：一旦回退会装上官方版，
+    #    导致面板变成上游原生布局（用户报告的「更新完还是 3.6 官方版」根因）。
     pkg_url="${GITHUB_RELEASES}/${version}/x-ui-linux-${XUI_ARCH}.tar.gz"
+    echo -e "${blue}下载地址: ${pkg_url}${plain}"
     if download_file "${temp_dir}/x-ui.tar.gz" "${pkg_url}"; then
-        download_success=1
-        USING_MODDED_BINARY=1
-        echo -e "${green}使用编译修复版 (内置 Reality 修复)${plain}"
+        # 校验文件确实存在且非空（防止 curl 写入空文件却返回 0）
+        if [[ -s "${temp_dir}/x-ui.tar.gz" ]]; then
+            download_success=1
+            USING_MODDED_BINARY=1
+            echo -e "${green}使用 saeson 编译修复版 (内置 Reality 修复 + 流量定时重置)${plain}"
+        else
+            echo -e "${red}下载文件为空，下载失败${plain}"
+        fi
     fi
 
-    # 如果我们的 release 没有，从上游下载，安装后启用运行时修复
     if [[ ${download_success} -eq 0 ]]; then
-        pkg_url="https://github.com/${UPSTREAM_REPO}/releases/latest/download/x-ui-linux-${XUI_ARCH}.tar.gz"
-        echo -e "${yellow}编译版暂未发布，从上游下载二进制包...${plain}"
-        echo -e "${yellow}(将使用运行时修复脚本作为替代方案)${plain}"
-        if ! download_file "${temp_dir}/x-ui.tar.gz" "${pkg_url}"; then
-            echo -e "${red}下载失败: ${pkg_url}${plain}"
-            rm -rf "${temp_dir}"
-            exit 1
-        fi
-        download_success=1
+        echo -e "${red}============================================${plain}"
+        echo -e "${red}  从 saeson fork 下载编译版失败！${plain}"
+        echo -e "${red}  为避免误装上游官方版（会丢失所有 mod 功能），已中止安装。${plain}"
+        echo -e "${red}============================================${plain}"
+        echo -e "${yellow}排查建议：${plain}"
+        echo -e "  1. 测试网络: ${blue}curl -fsSL -I ${pkg_url}${plain}"
+        echo -e "  2. 若 VPS 仅 IPv6，去掉 -4 强制: 编辑脚本把 download_file 的 curl -4 改为 curl"
+        echo -e "  3. 手动下载后上传到 /tmp 再安装，或等待网络恢复后重试"
+        rm -rf "${temp_dir}"
+        exit 1
     fi
 
     # 解压
