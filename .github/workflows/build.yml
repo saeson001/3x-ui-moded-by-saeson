@@ -19,6 +19,12 @@ jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
+    # saeson mod: compile inside Debian 11 (bullseye, glibc 2.31) so the produced
+    # binary runs on Debian 11/12 and Ubuntu 20.04+. The default ubuntu-latest
+    # (glibc 2.34+) produces binaries that fail on Debian 11 with
+    # "GLIBC_2.32/2.33/2.34 not found".
+    container:
+      image: debian:bullseye
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +36,13 @@ jobs:
             xray_arch: 64
 
     steps:
+      - name: Install container build dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y -q git curl wget tar ca-certificates unzip python3 \
+            gcc libc6-dev libsqlite3-dev pkg-config
+          echo "Container glibc: $(ldd --version | head -1)"
+
       - name: Checkout modified source
         uses: actions/checkout@v4
 
@@ -181,6 +194,17 @@ jobs:
           echo "=== Build complete ==="
           ls -lh x-ui
 
+          echo "=== GLIBC requirements (max version the binary needs) ==="
+          python3 - <<'PY'
+import re
+data = open('x-ui','rb').read()
+vers = set(re.findall(rb'GLIBC_(\d+\.\d+)', data))
+if vers:
+    print("max GLIBC required:", "GLIBC_" + max(vers))
+else:
+    print("no GLIBC version symbols found (static?)")
+PY
+
       - name: Download xray-core
         run: |
           XRAY_ARCH="${{ matrix.xray_arch }}"
@@ -273,6 +297,9 @@ jobs:
           name: "3x-ui moded by saeson ${{ github.ref_name }}"
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
+
+            ### v1.3.8 更新
+            - **构建兼容性修复 (关键)**: 改用 Debian 11 (bullseye, glibc 2.31) 容器编译，产出的面板二进制现在兼容 Debian 11 / 12 及 Ubuntu 20.04+（此前 ubuntu-latest 编译的二进制需要 GLIBC_2.32/2.33/2.34，在 Debian 11 上直接启动失败 `version GLIBC_2.xx not found`）
 
             ### v1.3.7 更新
             - **版本显示区分**: 侧边栏底部版本徽章改为 fork 版本号并链接到 saeson 仓库（悬停显示上游基线版本）；仪表盘 3X-UI 卡片移至最底部且默认折叠；面板更新弹窗顶部增加红色警告（官方更新器会覆盖修改版）并显示 saeson mod 版本
