@@ -157,8 +157,13 @@ update() {
     # 走本仓库的 install.sh（自带备份/恢复数据逻辑，等效于更新），
     # 二进制从本仓库 release 下载，保留全部魔改功能
     bash <(curl -Ls ${REPO_RAW}/install.sh)
-    if [[ $? == 0 ]]; then
-        LOGI "更新完成，面板已自动重启"
+    local upd_rc=$?
+    # 兜底：强制杀掉残留旧进程并重启服务，确保新二进制（含内嵌前端）真正接管，
+    # 避免「二进制已更新但浏览器仍显示旧版」的问题（旧进程可能非 systemd 拉起）
+    pkill -9 -f "${xui_folder}/x-ui" 2>/dev/null || true
+    systemctl restart x-ui 2>/dev/null || systemctl start x-ui 2>/dev/null || true
+    if [[ ${upd_rc} == 0 ]]; then
+        LOGI "更新完成，面板已强制重启"
         before_show_menu
     fi
 }

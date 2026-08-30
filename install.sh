@@ -22,7 +22,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.4.1"
+MOD_VERSION="v1.4.2"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -163,8 +163,10 @@ install_xui() {
     local version="${1:-$(get_latest_version)}"
     echo -e "${green}安装 3x-ui ${version}...${plain}"
 
-    # 停止旧服务
+    # 停止旧服务（并强杀可能残留的旧进程：避免覆盖正在运行的二进制、或旧进程未被
+    # systemd 跟踪导致后续 restart 变 no-op，仍用旧二进制吐旧前端）
     systemctl stop x-ui 2>/dev/null || rc-service x-ui stop 2>/dev/null || true
+    pkill -9 -f "${xui_folder}/x-ui" 2>/dev/null || true
 
     # 下载二进制包
     local temp_dir=$(mktemp -d)
@@ -320,6 +322,21 @@ EOF
     fi
 }
 
+# --- 启动/重启 x-ui 服务（强制杀掉残留旧进程）---
+# v1.4.2: 修复「二进制已更新、浏览器却仍显示旧版」的根因——旧 x-ui 进程可能并非由
+# systemd 拉起（或 stop 未匹配到），使 restart 成为 no-op，旧进程继续用内嵌的旧前端服务。
+# 这里先按二进制路径强杀任何残留进程，再 restart/start，确保新二进制（含内嵌前端）真正接管。
+start_xui_service() {
+    pkill -9 -f "${xui_folder}/x-ui" 2>/dev/null || true
+    sleep 1
+    if [[ "${release}" == "alpine" ]]; then
+        rc-service x-ui restart 2>/dev/null || rc-service x-ui start 2>/dev/null || true
+    else
+        systemctl restart x-ui 2>/dev/null || systemctl start x-ui 2>/dev/null || nohup "${xui_folder}/x-ui" >/dev/null 2>&1 &
+    fi
+    sleep 2
+}
+
 # --- 配置面板 ---
 configure_panel() {
     local server_ip=$(get_server_ip)
@@ -329,13 +346,8 @@ configure_panel() {
     if [[ -f /etc/x-ui/x-ui.db ]]; then
         echo -e "${yellow}检测到已有面板数据，保留原有账号/端口/基础路径不变${plain}"
 
-        # 启动服务
-        if [[ "${release}" == "alpine" ]]; then
-            rc-service x-ui start
-        else
-            systemctl start x-ui
-        fi
-        sleep 2
+        # 启动服务（强制重启，杀掉残留旧进程）
+        start_xui_service
 
         # 读取现有配置并展示
         local info=$(${xui_folder}/x-ui setting -show true 2>/dev/null || echo "")
@@ -384,12 +396,8 @@ configure_panel() {
     ${xui_folder}/x-ui setting -port "${port}" >/dev/null 2>&1
     ${xui_folder}/x-ui setting -webBasePath "${webBasePath}" >/dev/null 2>&1
 
-    # 启动服务
-    if [[ "${release}" == "alpine" ]]; then
-        rc-service x-ui start
-    else
-        systemctl start x-ui
-    fi
+    # 启动服务（强制重启，杀掉残留旧进程）
+    start_xui_service
 
     # 等待启动
     sleep 2
