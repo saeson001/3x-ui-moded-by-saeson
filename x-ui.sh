@@ -155,8 +155,9 @@ update() {
         return 0
     fi
     # 走本仓库的 install.sh（自带备份/恢复数据逻辑，等效于更新），
-    # 二进制从本仓库 release 下载，保留全部魔改功能
-    bash <(curl -Ls ${REPO_RAW}/install.sh)
+    # 二进制从本仓库 release 下载，保留全部魔改功能。
+    # 注意：必须显式传 update 子命令，否则 install.sh 会进入交互菜单而非直接更新
+    bash <(curl -Ls ${REPO_RAW}/install.sh) update
     local upd_rc=$?
     # 兜底：强制杀掉残留旧进程并重启服务，确保新二进制（含内嵌前端）真正接管，
     # 避免「二进制已更新但浏览器仍显示旧版」的问题（旧进程可能非 systemd 拉起）
