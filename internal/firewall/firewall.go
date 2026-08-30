@@ -489,7 +489,7 @@ func buildStatus(db *gorm.DB, cfg *Config) *Status {
 	st.InboundPorts = inbounds
 	st.AllPorts = all
 	if !st.BackendFound {
-		st.Notice = "未检测到 ufw 或 firewalld，请先安装其一（Debian/Ubuntu: apt install ufw；CentOS: yum install firewalld）"
+		st.Notice = "未检测到 ufw 或 firewalld。推荐做法：SSH 登录服务器后执行 x-ui，选择菜单「30. 安装并安全启用防火墙」（或直接运行 x-ui firewall-install），会自动安装后端并放行 SSH / 面板 / 节点端口。手动安装：Debian/Ubuntu 执行 apt install -y ufw；CentOS/RHEL 执行 yum install -y firewalld。"
 	}
 	return st
 }

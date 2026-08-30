@@ -146,7 +146,17 @@ export default function SaesonFirewallCard() {
         {st && !st.backendFound && (
           <div style={{ marginBottom: 12 }}>
             <Tag color="orange">未检测到 ufw / firewalld</Tag>
-            <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>{st.notice}</div>
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: '#888',
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.7,
+              }}
+            >
+              {st.notice}
+            </div>
           </div>
         )}
         {st && st.backendFound && (
