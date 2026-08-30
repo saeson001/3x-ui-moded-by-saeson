@@ -13,7 +13,6 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/firewall"
 	"github.com/mhsanaei/3x-ui/v3/internal/netstats"
 	"github.com/mhsanaei/3x-ui/v3/internal/trafficlog"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 	"gorm.io/gorm"
 )
