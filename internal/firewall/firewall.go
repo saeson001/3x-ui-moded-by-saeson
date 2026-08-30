@@ -1,7 +1,7 @@
 // Package firewall provides one-click host firewall management for 3x-ui.
 //
 // It opens ONLY these ports (everything else inbound is denied):
-//   - SSH port(s) (auto-detected via ss, fallback 22)
+//   - SSH port(s) (auto-detected via ss, then sshd_config + sshd_config.d/*.conf, fallback 22)
 //   - Panel web port + subscription port (from panel settings)
 //   - Every inbound port configured in the panel (proxy nodes)
 //   - User-defined extra ports (persisted in /etc/x-ui/firewall.json)
@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -103,7 +104,26 @@ func saveConfig(cfg *Config) error {
 
 // ---------- port discovery ----------
 
-// detectSSHPorts finds ports sshd is actually listening on (fallback 22).
+// sshdConfigFiles returns the main sshd config plus every drop-in file.
+// Debian 12 / Ubuntu 24 commonly override the SSH port in
+// /etc/ssh/sshd_config.d/*.conf, so the drop-ins MUST be parsed as well —
+// otherwise the allow-list would be built from a stale port and the user
+// would be locked out after enabling the firewall.
+func sshdConfigFiles() []string {
+	files := []string{"/etc/ssh/sshd_config"}
+	if matches, err := filepath.Glob("/etc/ssh/sshd_config.d/*.conf"); err == nil {
+		sort.Strings(matches)
+		files = append(files, matches...)
+	}
+	return files
+}
+
+// detectSSHPorts finds the port(s) sshd listens on.
+// Detection order (mirrors x-ui.sh get_ssh_ports, minus $SSH_CONNECTION which
+// is not available to the panel service):
+//   1. live listening sockets reported by `ss -tlnp`
+//   2. `Port` directives in sshd_config + sshd_config.d/*.conf
+//   3. fallback 22
 func detectSSHPorts() []int {
 	ports := map[int]bool{}
 	if out, err := run("ss", "-tlnp"); err == nil {
@@ -118,6 +138,26 @@ func detectSSHPorts() []int {
 						}
 					}
 				}
+			}
+		}
+	}
+	for _, file := range sshdConfigFiles() {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			trimmed := strings.TrimSpace(line)
+			// Skip comments: a commented-out "#Port 22" must never be used.
+			if !strings.HasPrefix(strings.ToLower(trimmed), "port") {
+				continue
+			}
+			fields := strings.Fields(trimmed)
+			if len(fields) < 2 {
+				continue
+			}
+			if p, err := strconv.Atoi(fields[1]); err == nil && p > 0 && p < 65536 {
+				ports[p] = true
 			}
 		}
 	}
