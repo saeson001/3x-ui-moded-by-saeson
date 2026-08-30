@@ -82,30 +82,30 @@ install_base() {
     echo -e "${green}安装基础依赖...${plain}"
     case "${release}" in
         ubuntu | debian | armbian)
-            apt-get update -qq && apt-get install -y -q curl wget tar socat openssl cron tzdata ca-certificates
+            apt-get update -qq && apt-get install -y -q curl wget tar socat openssl cron tzdata ca-certificates libsqlite3-0
             ;;
         fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
-            dnf makecache -y && dnf install -y -q curl wget tar socat openssl cronie tzdata ca-certificates
+            dnf makecache -y && dnf install -y -q curl wget tar socat openssl cronie tzdata ca-certificates sqlite-libs
             ;;
         centos)
             if [[ "${VERSION_ID}" =~ ^7 ]]; then
-                yum makecache -y && yum install -y curl wget tar socat openssl cronie tzdata ca-certificates
+                yum makecache -y && yum install -y curl wget tar socat openssl cronie tzdata ca-certificates sqlite-libs
             else
-                dnf makecache -y && dnf install -y -q curl wget tar socat openssl cronie tzdata ca-certificates
+                dnf makecache -y && dnf install -y -q curl wget tar socat openssl cronie tzdata ca-certificates sqlite-libs
             fi
             ;;
         arch | manjaro | parch)
-            pacman -Sy --noconfirm curl wget tar socat openssl cronie tzdata ca-certificates
+            pacman -Sy --noconfirm curl wget tar socat openssl cronie tzdata ca-certificates sqlite
             ;;
         opensuse-tumbleweed | opensuse-leap)
-            zypper refresh && zypper -q install -y curl wget tar socat openssl cron tzdata ca-certificates
+            zypper refresh && zypper -q install -y curl wget tar socat openssl cron tzdata ca-certificates sqlite3
             ;;
         alpine)
-            apk update && apk add curl wget tar socat openssl dcron tzdata ca-certificates
+            apk update && apk add curl wget tar socat openssl dcron tzdata ca-certificates sqlite
             ;;
         *)
             echo -e "${yellow}未识别的系统，尝试使用 apt...${plain}"
-            apt-get update -qq && apt-get install -y -q curl wget tar socat openssl cron tzdata ca-certificates
+            apt-get update -qq && apt-get install -y -q curl wget tar socat openssl cron tzdata ca-certificates libsqlite3-0
             ;;
     esac
 }
