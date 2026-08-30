@@ -18,12 +18,11 @@ REPO_OWNER="saeson001"
 REPO_NAME="3x-ui-moded-by-saeson"
 GITHUB_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
 GITHUB_RELEASES="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download"
-UPSTREAM_REPO="MHSanaei/3x-ui"
 xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.4.0"
+MOD_VERSION="v1.4.1"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -195,8 +194,9 @@ install_xui() {
         echo -e "${red}============================================${plain}"
         echo -e "${yellow}排查建议：${plain}"
         echo -e "  1. 测试网络: ${blue}curl -fsSL -I ${pkg_url}${plain}"
-        echo -e "  2. 若 VPS 仅 IPv6，去掉 -4 强制: 编辑脚本把 download_file 的 curl -4 改为 curl"
-        echo -e "  3. 手动下载后上传到 /tmp 再安装，或等待网络恢复后重试"
+        echo -e "  2. 确认仓库 ${REPO_OWNER}/${REPO_NAME} 的 Release 是否已发布对应版本（x-ui-linux-${XUI_ARCH}.tar.gz）"
+        echo -e "  3. 若仍拉取失败，手动从 GitHub Releases 下载该文件上传到 VPS，"
+        echo -e "     解压后覆盖 /usr/local/x-ui/ 再执行 x-ui 重启"
         rm -rf "${temp_dir}"
         exit 1
     fi

@@ -229,20 +229,9 @@ update_menu() {
     fi
 }
 
-legacy_version() {
-    echo -n "Enter the panel version (like 2.4.0):"
-    read -r tag_version
-
-    if [ -z "$tag_version" ]; then
-        echo "Panel version cannot be empty. Exiting."
-        exit 1
-    fi
-    # Use the entered panel version in the download link
-    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/v$tag_version/install.sh") v$tag_version"
-
-    echo "Downloading and installing panel version $tag_version..."
-    eval $install_command
-}
+# legacy_version: 已移除 —— 该函数会从官方 MHSanaei 仓库按版本安装面板，
+# 覆盖本魔改版（Clash Link/流量监控/防火墙/汉化/流量定时重置全部丢失），
+# 因此禁用。更新一律走本仓库 saeson001/3x-ui-moded-by-saeson 的 install.sh。
 
 # Function to handle the deletion of the script file
 delete_script() {
@@ -303,7 +292,7 @@ uninstall() {
     echo ""
     echo -e "Uninstalled Successfully.\n"
     echo "If you need to install this panel again, you can use below command:"
-    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)${plain}"
+    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/saeson001/3x-ui-moded-by-saeson/main/install.sh)${plain}"
     echo ""
     # Trap the SIGTERM signal
     trap delete_script SIGTERM
@@ -1087,9 +1076,9 @@ show_version() {
 
     # 最新版本（GitHub API，网络不通或超时则显示获取失败，不影响本地版本显示）
     local latest_panel="" latest_xray=""
-    latest_panel=$(curl -4fsSL --max-time 10 "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null \
+    latest_panel=$(curl -fsSL --max-time 10 "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null \
         | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-    latest_xray=$(curl -4fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
+    latest_xray=$(curl -fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
         | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
     echo -e "  面板最新版本: ${green}${latest_panel:-获取失败}${plain}"
     echo -e "  Xray 最新版本: ${green}${latest_xray:-获取失败}${plain}"
@@ -3673,7 +3662,7 @@ show_usage() {
 │  ${blue}x-ui update-all-geofiles${plain}   - 更新所有 Geo 文件           │
 │  ${blue}x-ui migrateDB [file]${plain}      - 转换 .db <-> .dump (SQLite) │
 │  ${blue}x-ui pgclient [ver]${plain}        - 升级 pg_dump/pg_restore   │
-│  ${blue}x-ui legacy${plain}                - 旧版本                     │
+│  ${blue}x-ui legacy${plain}                - 安装官方旧版本（已禁用）    │
 │  ${blue}x-ui install${plain}               - 安装                       │
 │  ${blue}x-ui uninstall${plain}             - 卸载                       │
 └────────────────────────────────────────────────────────────────┘"
@@ -3689,7 +3678,7 @@ show_menu() {
 │  ${green}2.${plain} 更新（本仓库魔改版）                     │
 │  ${green}3.${plain} 开发通道（本仓库未提供）                 │
 │  ${green}4.${plain} 查看面板设置                             │
-│  ${green}5.${plain} 旧版本                                   │
+│  ${green}5.${plain} 安装官方旧版本（已禁用）               │
 │  ${green}6.${plain} 卸载                                     │
 │────────────────────────────────────────────────│
 │  ${green}7.${plain} 重置用户名和密码                         │
@@ -3741,7 +3730,7 @@ show_menu() {
             check_install && check_config
             ;;
         5)
-            check_install && legacy_version
+            check_install && LOGE "本修改版不支持安装指定官方旧版本（会从官方 MHSanaei 仓库拉取官方二进制、覆盖全部魔改功能）。更新请使用选项 2（x-ui update，基于本仓库 saeson001/3x-ui-moded-by-saeson）。"
             ;;
         6)
             check_install && uninstall
@@ -3866,7 +3855,7 @@ if [[ $# > 0 ]]; then
             check_install 0 && update_dev 0
             ;;
         "legacy")
-            check_install 0 && legacy_version 0
+            check_install 0 && LOGE "本修改版不支持安装指定官方旧版本，更新请使用 x-ui update（本仓库魔改版）。"
             ;;
         "install")
             check_uninstall 0 && install 0

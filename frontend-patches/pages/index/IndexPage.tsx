@@ -75,7 +75,6 @@ export default function IndexPage() {
   useEffect(() => { setMessageInstance(messageApi); }, [messageApi]);
 
   const [accessLogEnable, setAccessLogEnable] = useState(false);
-  const [devChannelEnable, setDevChannelEnable] = useState(false);
   const [panelUpdateInfo, setPanelUpdateInfo] = useState<PanelUpdateInfo>({
     currentVersion: '',
     latestVersion: '',
@@ -98,12 +97,9 @@ export default function IndexPage() {
   const [loadingTip, setLoadingTip] = useState(t('loading'));
 
   useEffect(() => {
-    HttpUtil.post<{ accessLogEnable?: boolean; devChannelEnable?: boolean }>(
-      '/panel/api/setting/defaultSettings',
-    ).then((msg) => {
+    HttpUtil.post<{ accessLogEnable?: boolean }>('/panel/api/setting/defaultSettings').then((msg) => {
       if (msg?.success && msg.obj) {
         setAccessLogEnable(!!msg.obj.accessLogEnable);
-        setDevChannelEnable(!!msg.obj.devChannelEnable);
       }
     });
     HttpUtil.get<PanelUpdateInfo>('/panel/api/server/getPanelUpdateInfo').then((msg) => {
@@ -136,14 +132,6 @@ export default function IndexPage() {
 
   function openPanelVersion() {
     setPanelUpdateOpen(true);
-  }
-
-  async function handleChannelChange(dev: boolean) {
-    const res = await HttpUtil.post('/panel/api/server/setUpdateChannel', { dev });
-    if (!res?.success) return;
-    setDevChannelEnable(dev);
-    const msg = await HttpUtil.get<PanelUpdateInfo>('/panel/api/server/getPanelUpdateInfo');
-    if (msg?.success && msg.obj) setPanelUpdateInfo(msg.obj);
   }
 
   function openTelegram() {
@@ -446,11 +434,6 @@ export default function IndexPage() {
                               <CloudDownloadOutlined />
                               <span>3X-UI</span>
                               <Tag color="geekblue">saeson {SAESON_MOD_VERSION}</Tag>
-                              {panelUpdateInfo.updateAvailable && (
-                                <Tag color="orange">
-                                  {t('update')} {formatPanelVersion(panelUpdateInfo.latestVersion)}
-                                </Tag>
-                              )}
                             </Space>
                           ),
                           children: (
@@ -478,11 +461,7 @@ export default function IndexPage() {
                                 >
                                   <CloudDownloadOutlined />
                                   {!isMobile && (
-                                    <span>
-                                      {panelUpdateInfo.updateAvailable
-                                        ? `${t('update')} ${formatPanelVersion(panelUpdateInfo.latestVersion)}`
-                                        : formatPanelVersion(displayVersion)}
-                                    </span>
+                                    <span>{formatPanelVersion(displayVersion)}</span>
                                   )}
                                 </Space>,
                               ]}
@@ -502,10 +481,7 @@ export default function IndexPage() {
           <PanelUpdateModal
             open={panelUpdateOpen}
             info={panelUpdateInfo}
-            devChannelEnable={devChannelEnable}
-            onChannelChange={handleChannelChange}
             onClose={() => setPanelUpdateOpen(false)}
-            onBusy={setBusy}
           />
         </LazyMount>
         <LazyMount when={logsOpen}>
