@@ -99,6 +99,7 @@ jobs:
           if [ -d frontend-patches ]; then
             cp -f frontend-patches/pages/inbounds/qr/QrCodeModal.tsx frontend/src/pages/inbounds/qr/QrCodeModal.tsx
             cp -f frontend-patches/pages/clients/ClientQrModal.tsx frontend/src/pages/clients/ClientQrModal.tsx
+            cp -f frontend-patches/pages/clients/ClientResetModal.tsx frontend/src/pages/clients/ClientResetModal.tsx
             # saeson: traffic breakdown + firewall cards on dashboard
             cp -f frontend-patches/pages/index/IndexPage.tsx frontend/src/pages/index/IndexPage.tsx
             cp -f frontend-patches/pages/index/SaesonTrafficCard.tsx frontend/src/pages/index/SaesonTrafficCard.tsx
@@ -145,6 +146,11 @@ jobs:
         run: |
           python3 scripts/inject_saeson_routes.py . .
           echo "Saeson netstats + firewall injection complete"
+
+      - name: Inject client scheduled-reset UI
+        run: |
+          python3 scripts/inject_client_reset.py . .
+          echo "Client scheduled-reset UI injection complete"
 
       - name: Inject Xray version list patch
         run: |
@@ -292,6 +298,10 @@ jobs:
           name: "3x-ui moded by saeson ${{ github.ref_name }}"
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
+
+            ### v1.4.0 更新（客户端流量定时重置）
+            - **客户端流量定时重置（新功能）**：客户端页每行新增「流量定时重置」按钮（扫帚图标），可设置「每月 X 号 H 点」自动将该客户端流量清零。复用面板原生重置逻辑（`ClientService.ResetTrafficByEmail`），同时重置 DB 计数与 Xray 内存计数器，并自动启用被禁用的客户端。日期超过当月天数自动取月末。后台每分钟巡检，到点或错过时点当日均会补执行。后端独立表 `saeson_client_reset` + 4 个鉴权 API（`/panel/api/client-reset/{list,set,remove,reset-now}`）；支持「立即重置」手动触发
+            - **客户端页原生能力提醒**：到期时间 / 总流量(流量上限) / 关联入站 / 续费周期(每 N 天滚动重置) 均为上游 3.4.2 客户端编辑弹窗「基础信息」页签自带字段，无需额外开发；本次新增的「定时重置」为上游 3.7 才有的「按日历日重置」能力的 3.4.2 移植版
 
             ### v1.3.9 更新
             - **流量时段统计 (新功能)**: 仪表盘新增「流量时段统计」卡片。可按「节点」或「用户」切换，并查看 **24小时内 / 7天内 / 1月内 / 1年内** 的上传/下载流量（分组柱状图 + 累计数值）。后端每 5 分钟采样各入站与各客户端的累计流量并存储小时差值，查询时按所选时段聚合（24h→每小时、7d→每6小时、1mo→每天、1yr→每月）。Xray 重启导致计数器清零会显示为静默时段而非负尖峰

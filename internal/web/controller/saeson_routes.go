@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mhsanaei/3x-ui/v3/internal/clientreset"
 	"github.com/mhsanaei/3x-ui/v3/internal/firewall"
 	"github.com/mhsanaei/3x-ui/v3/internal/netstats"
 	"github.com/mhsanaei/3x-ui/v3/internal/trafficlog"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 	"gorm.io/gorm"
 )
@@ -33,13 +35,19 @@ func requireLogin() gin.HandlerFunc {
 	}
 }
 
-// RegisterSaesonRoutes registers the saeson mod routes (netstats + firewall)
-// on the authenticated API group. Called from web.go after NewAPIController.
-func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB) {
+// RegisterSaesonRoutes registers the saeson mod routes (netstats + firewall
+// + client traffic scheduled reset) on the authenticated API group. Called
+// from web.go after NewAPIController. The *APIController is passed so we can
+// reach its private inboundController and reuse the upstream ClientService /
+// InboundService for the actual traffic reset (clears DB + Xray in-memory).
+func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIController) {
 	g := apiGroup.Group("", requireLogin())
 
 	// --- Historical traffic sampler (per inbound / per client, bucketed) ---
 	trafficlog.Start(db)
+
+	// --- Per-client scheduled traffic reset (calendar day) ---
+	clientreset.Start(db, api.inboundController.clientService, api.inboundController.inboundService)
 
 	// --- Traffic breakdown: NIC vs Xray vs system ---
 	g.GET("/netstats", func(c *gin.Context) {
@@ -174,5 +182,88 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "", "obj": s})
+	})
+
+	// --- Per-client scheduled traffic reset (calendar day) ---
+	cg := g.Group("/client-reset")
+	cg.GET("/list", func(c *gin.Context) {
+		rows, err := clientreset.List(db)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "", "obj": rows})
+	})
+	cg.POST("/set", func(c *gin.Context) {
+		// Accept both JSON and the upstream form-urlencoded default so the
+		// client page can post either way.
+		body, _ := io.ReadAll(c.Request.Body)
+		req := struct {
+			Email       string `json:"email"`
+			ResetDay    int    `json:"resetDay"`
+			ResetHour   int    `json:"resetHour"`
+			ResetMinute int    `json:"resetMinute"`
+			Enable      bool   `json:"enable"`
+		}{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			if vals, e2 := url.ParseQuery(string(body)); e2 == nil {
+				req.Email = vals.Get("email")
+				req.ResetDay, _ = strconv.Atoi(vals.Get("resetDay"))
+				req.ResetHour, _ = strconv.Atoi(vals.Get("resetHour"))
+				req.ResetMinute, _ = strconv.Atoi(vals.Get("resetMinute"))
+				req.Enable = vals.Get("enable") == "true" || vals.Get("enable") == "1"
+			}
+		}
+		if req.Email == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "email required", "obj": nil})
+			return
+		}
+		if err := clientreset.Set(db, req.Email, req.ResetDay, req.ResetHour, req.ResetMinute, req.Enable); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "已保存定时重置规则", "obj": nil})
+	})
+	cg.POST("/remove", func(c *gin.Context) {
+		var req struct {
+			Email string `json:"email"`
+		}
+		if b, _ := io.ReadAll(c.Request.Body); len(b) > 0 {
+			if err := json.Unmarshal(b, &req); err != nil {
+				if v, e2 := url.ParseQuery(string(b)); e2 == nil {
+					req.Email = v.Get("email")
+				}
+			}
+		}
+		if req.Email == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "email required", "obj": nil})
+			return
+		}
+		if err := clientreset.Remove(db, req.Email); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "已删除定时重置规则", "obj": nil})
+	})
+	cg.POST("/reset-now", func(c *gin.Context) {
+		var req struct {
+			Email string `json:"email"`
+		}
+		if b, _ := io.ReadAll(c.Request.Body); len(b) > 0 {
+			if err := json.Unmarshal(b, &req); err != nil {
+				if v, e2 := url.ParseQuery(string(b)); e2 == nil {
+					req.Email = v.Get("email")
+				}
+			}
+		}
+		if req.Email == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "email required", "obj": nil})
+			return
+		}
+		if err := clientreset.ResetNow(db, req.Email); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "已立即重置流量", "obj": nil})
 	})
 }

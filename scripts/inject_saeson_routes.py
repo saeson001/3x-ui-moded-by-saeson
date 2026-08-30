@@ -48,8 +48,8 @@ def inject_register(web_go_path):
     lines = content.splitlines(keepends=True)
 
     injection_code = (
-        '\t// --- moded by saeson: netstats + firewall ---\n'
-        '\tcontroller.RegisterSaesonRoutes(g.Group("/panel/api"), database.GetDB())\n'
+        '\t// --- moded by saeson: netstats + firewall + client scheduled reset ---\n'
+        '\tcontroller.RegisterSaesonRoutes(g.Group("/panel/api"), database.GetDB(), s.api)\n'
         '\t// --- end saeson routes ---\n\n'
     )
 
@@ -104,6 +104,8 @@ def main():
               os.path.join(build_root, 'internal', 'firewall'))
     copy_tree(os.path.join(project_root, 'internal', 'trafficlog'),
               os.path.join(build_root, 'internal', 'trafficlog'))
+    copy_tree(os.path.join(project_root, 'internal', 'clientreset'),
+              os.path.join(build_root, 'internal', 'clientreset'))
     # Controller file lives under internal/web/controller in our repo too,
     # but the CI prepare step already copies it; still handle standalone case.
     ctrl_src = os.path.join(project_root, 'internal', 'web', 'controller', 'saeson_routes.go')
