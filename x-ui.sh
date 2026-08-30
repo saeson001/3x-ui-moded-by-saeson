@@ -1120,6 +1120,7 @@ detect_fw_backend() {
 
 get_ssh_ports() {
     local ports=()
+    # 1) 从 sshd 实际监听端口（ss 探测）
     if command -v ss &>/dev/null; then
         while read -r line; do
             if echo "$line" | grep -q sshd; then
@@ -1129,8 +1130,17 @@ get_ssh_ports() {
             fi
         done < <(ss -tlnp 2>/dev/null)
     fi
+    # 2) 兜底：从 sshd_config 的 Port 指令读取（防止非标准端口未被 ss 识别而漏放，导致锁死自己）
+    if [[ -r /etc/ssh/sshd_config ]]; then
+        while read -r p; do
+            [[ "$p" =~ ^[0-9]+$ ]] && ports+=("$p")
+        done < <(grep -oE '^[[:space:]]*Port[[:space:]]+[0-9]+' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    fi
+    # 去重；仍为空则回退 22
     if [ ${#ports[@]} -eq 0 ]; then
         ports+=(22)
+    else
+        ports=($(echo "${ports[@]}" | tr ' ' '\n' | sort -un | tr '\n' ' '))
     fi
     echo "${ports[@]}" | tr ' ' '\n' | sort -un | tr '\n' ' '
 }
@@ -1247,6 +1257,29 @@ firewall_secure_enable() {
     echo -e "${green}[INF] Firewall enabled. Allowed ports (SSH + panel + nodes):${plain}"
     echo "  $all_ports"
     echo -e "${green}[INF] Add a custom port later with: ufw allow <port>  (or menu option 3)${plain}"
+}
+
+# firewall_install_and_enable: 安全命令入口（x-ui firewall-install / 菜单选项 30）
+# 步骤：若系统未安装防火墙后端 → 按发行版自动安装（Debian/Ubuntu 装 ufw，
+# RHEL/CentOS 装 firewalld）；随后调用一键安全开启（自动放行 SSH + 面板 +
+# 全部节点端口，其余入站拒绝）。SSH 端口探测不到时拒绝开启，绝不会把自己锁门外。
+firewall_install_and_enable() {
+    local backend
+    backend=$(detect_fw_backend)
+    if [ -z "$backend" ]; then
+        echo -e "${yellow}[INF] 未检测到防火墙后端，正在按发行版自动安装...${plain}"
+        install_firewall
+        backend=$(detect_fw_backend)
+    fi
+    if [ -z "$backend" ]; then
+        LOGE "防火墙后端安装失败。请手动安装：Debian/Ubuntu: apt install -y ufw；RHEL/CentOS: yum install -y firewalld"
+        return 1
+    fi
+    echo -e "${green}[INF] 防火墙后端已就绪: ${backend}${plain}"
+    firewall_secure_enable
+    if [[ $# == 0 ]]; then
+        before_show_menu
+    fi
 }
 
 firewall_sync_nodes() {
@@ -3668,6 +3701,7 @@ show_usage() {
 │  ${blue}x-ui update-all-geofiles${plain}   - 更新所有 Geo 文件           │
 │  ${blue}x-ui migrateDB [file]${plain}      - 转换 .db <-> .dump (SQLite) │
 │  ${blue}x-ui pgclient [ver]${plain}        - 升级 pg_dump/pg_restore   │
+│  ${blue}x-ui firewall-install${plain}      - 安装并安全启用防火墙       │
 │  ${blue}x-ui legacy${plain}                - 安装官方旧版本（已禁用）    │
 │  ${blue}x-ui install${plain}               - 安装                       │
 │  ${blue}x-ui uninstall${plain}             - 卸载                       │
@@ -3714,10 +3748,11 @@ show_menu() {
 │  ${green}27.${plain} 更新 Geo 文件                           │
 │  ${green}28.${plain} Ookla 测速                              │
 │  ${green}29.${plain} 查看版本信息                            │
+│  ${green}30.${plain} 安装并安全启用防火墙                      │
 ╚────────────────────────────────────────────────╝
 "
     show_status
-    echo && read -rp "请输入选项 [0-29]: " num
+    echo && read -rp "请输入选项 [0-30]: " num
 
     case "${num}" in
         0)
@@ -3810,8 +3845,11 @@ show_menu() {
         29)
             show_version
             ;;
+        30)
+            check_install && firewall_install_and_enable
+            ;;
         *)
-            LOGE "请输入正确的数字 [0-29]"
+            LOGE "请输入正确的数字 [0-30]"
             ;;
     esac
 }
@@ -3880,6 +3918,9 @@ if [[ $# > 0 ]]; then
             ;;
         "pgclient")
             pg_upgrade_client "$2"
+            ;;
+        "firewall-install")
+            check_install 0 && firewall_install_and_enable 0
             ;;
         *) show_usage ;;
     esac
