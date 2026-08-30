@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mhsanaei/3x-ui/v3/internal/firewall"
 	"github.com/mhsanaei/3x-ui/v3/internal/netstats"
+	"github.com/mhsanaei/3x-ui/v3/internal/trafficlog"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 	"gorm.io/gorm"
 )
@@ -36,6 +37,9 @@ func requireLogin() gin.HandlerFunc {
 // on the authenticated API group. Called from web.go after NewAPIController.
 func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB) {
 	g := apiGroup.Group("", requireLogin())
+
+	// --- Historical traffic sampler (per inbound / per client, bucketed) ---
+	trafficlog.Start(db)
 
 	// --- Traffic breakdown: NIC vs Xray vs system ---
 	g.GET("/netstats", func(c *gin.Context) {
@@ -125,5 +129,50 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "ok", "obj": st})
+	})
+
+	// --- Historical traffic: per inbound (node) / per client (user) ---
+	tg := g.Group("/traffic")
+	tg.GET("/targets", func(c *gin.Context) {
+		t, err := trafficlog.GetTargets(db)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "", "obj": t})
+	})
+
+	tg.GET("/history", func(c *gin.Context) {
+		scope := c.Query("scope")
+		ref := c.Query("ref")
+		rng := c.Query("range")
+		if scope != "inbound" && scope != "client" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "invalid scope (want inbound|client)", "obj": nil})
+			return
+		}
+		if ref == "" {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "missing ref", "obj": nil})
+			return
+		}
+		var span, bk int
+		switch rng {
+		case "24h":
+			span, bk = 24, 1
+		case "7d":
+			span, bk = 168, 6
+		case "1mo":
+			span, bk = 720, 24
+		case "1yr":
+			span, bk = 8760, 720
+		default:
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "invalid range (want 24h|7d|1mo|1yr)", "obj": nil})
+			return
+		}
+		s, err := trafficlog.Query(db, scope, ref, span, bk)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "", "obj": s})
 	})
 }

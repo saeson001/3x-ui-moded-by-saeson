@@ -51,6 +51,7 @@ import StatusCard from './StatusCard';
 import XrayStatusCard from './XrayStatusCard';
 import SaesonTrafficCard from './SaesonTrafficCard';
 import SaesonFirewallCard from './SaesonFirewallCard';
+import SaesonTrafficHistoryCard from './SaesonTrafficHistoryCard';
 import type { PanelUpdateInfo } from './PanelUpdateModal';
 const JsonEditor = lazy(() => import('@/components/form/JsonEditor'));
 const PanelUpdateModal = lazy(() => import('./PanelUpdateModal'));
@@ -360,6 +361,7 @@ export default function IndexPage() {
 
                   <SaesonTrafficCard />
                   <SaesonFirewallCard />
+                  <SaesonTrafficHistoryCard />
 
                   <Col xs={24} lg={12}>
                     <Card
