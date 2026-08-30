@@ -1120,22 +1120,30 @@ detect_fw_backend() {
 
 get_ssh_ports() {
     local ports=()
-    # 1) 从 sshd 实际监听端口（ss 探测）
+    local p
+    # 1) 【最可靠】当前会话实际连入的端口：SSH_CONNECTION="客户端IP 客户端端口 服务端IP 服务端端口"
+    #    由 SSH 登录 shell 继承而来，只要脚本在 SSH 会话里执行就一定是正确的那个端口。
+    if [[ -n "${SSH_CONNECTION}" ]]; then
+        p=$(echo "${SSH_CONNECTION}" | awk '{print $4}')
+        [[ "$p" =~ ^[0-9]+$ ]] && ports+=("$p")
+    fi
+    # 2) sshd 实际监听端口（ss 探测）
     if command -v ss &>/dev/null; then
         while read -r line; do
             if echo "$line" | grep -q sshd; then
-                local port
-                port=$(echo "$line" | awk '{print $4}' | rev | cut -d':' -f1 | rev)
-                [[ "$port" =~ ^[0-9]+$ ]] && ports+=("$port")
+                p=$(echo "$line" | awk '{print $4}' | rev | cut -d':' -f1 | rev)
+                [[ "$p" =~ ^[0-9]+$ ]] && ports+=("$p")
             fi
         done < <(ss -tlnp 2>/dev/null)
     fi
-    # 2) 兜底：从 sshd_config 的 Port 指令读取（防止非标准端口未被 ss 识别而漏放，导致锁死自己）
-    if [[ -r /etc/ssh/sshd_config ]]; then
+    # 3) 配置文件兜底：主配置 + sshd_config.d/*.conf（Debian 12/Ubuntu 24 常用 drop-in 改端口）
+    local cfg
+    for cfg in /etc/ssh/sshd_config $(ls /etc/ssh/sshd_config.d/*.conf 2>/dev/null); do
+        [[ -r "$cfg" ]] || continue
         while read -r p; do
             [[ "$p" =~ ^[0-9]+$ ]] && ports+=("$p")
-        done < <(grep -oE '^[[:space:]]*Port[[:space:]]+[0-9]+' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
-    fi
+        done < <(grep -oE '^[[:space:]]*Port[[:space:]]+[0-9]+' "$cfg" 2>/dev/null | awk '{print $2}')
+    done
     # 去重；仍为空则回退 22
     if [ ${#ports[@]} -eq 0 ]; then
         ports+=(22)
