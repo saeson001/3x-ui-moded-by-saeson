@@ -22,7 +22,7 @@ xui_folder="${XUI_MAIN_FOLDER:=/usr/local/x-ui}"
 xui_service="${XUI_SERVICE:=/etc/systemd/system}"
 
 # --- 版本标签 ---
-MOD_VERSION="v1.4.9"
+MOD_VERSION="v1.5.0"
 
 # --- 检查 root ---
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain}请使用 root 权限运行此脚本" && exit 1
@@ -183,7 +183,7 @@ install_xui() {
         if [[ -s "${temp_dir}/x-ui.tar.gz" ]]; then
             download_success=1
             USING_MODDED_BINARY=1
-            echo -e "${green}使用 saeson 编译修复版 (内置 Reality 修复 + 流量定时重置)${plain}"
+            echo -e "${green}使用 saeson 定制版 (批量关联入站 + 流量重置 + Reality 修复)${plain}"
         else
             echo -e "${red}下载文件为空，下载失败${plain}"
         fi
@@ -463,9 +463,8 @@ configure_firewall() {
 apply_reality_fix() {
     # 如果使用的是编译修复版，Go 源码已内置修复，无需运行时脚本
     if [[ ${USING_MODDED_BINARY} -eq 1 ]]; then
-        echo -e "${green}External Proxy + REALITY 修复 (Go 源码级): 已内置在二进制中${plain}"
-        echo -e "${green}Clash Link 订阅功能: 已内置在二进制中${plain}"
-        echo -e "${green}无需额外的运行时修复脚本。${plain}"
+        echo -e "${green}saeson 定制功能 (Go 源码级): 批量关联入站 / 流量重置 / Reality 修复 / Clash 订阅 — 已内置${plain}"
+        echo -e "${green}无需额外运行时脚本。${plain}"
         return 0
     fi
 
@@ -638,8 +637,8 @@ do_update() {
     
     local current_version=$(installed_xui_version)
     local latest_version=$(get_latest_version)
-    echo -e "${green}当前版本: ${current_version:-unknown}${plain}"
-    echo -e "${green}最新版本: ${latest_version}${plain}"
+    echo -e "${green}当前面板版本: ${current_version:-unknown} (定制版 ${MOD_VERSION})${plain}"
+    echo -e "${green}最新发布版本: ${latest_version}${plain}"
     
     if [[ "${current_version}" == "${latest_version}" ]]; then
         echo -e "${yellow}已经是最新版本，无需更新。${plain}"
@@ -697,7 +696,7 @@ do_update() {
     rm -rf "${temp_dir}"
     
     echo -e "${green}3x-ui 已更新到 ${latest_version}！${plain}"
-    echo -e "${yellow}提示: 使用 x-ui 命令打开管理菜单查看状态。${plain}"
+    echo -e "${yellow}提示: 运行 x-ui 命令打开管理菜单。${plain}"
 }
 
 # --- 查看版本 ---
@@ -708,9 +707,9 @@ do_check_version() {
     local current_version=$(installed_xui_version)
     local latest_version=$(get_latest_version)
     
-    echo -e "  当前安装版本: ${green}${current_version:-未安装}${plain}"
-    echo -e "  最新可用版本: ${green}${latest_version}${plain}"
-    echo -e "  脚本版本:     ${green}${MOD_VERSION}${plain}"
+    echo -e "  面板内核版本: ${green}${current_version:-未安装}${plain}"
+    echo -e "  定制版版本:   ${green}${MOD_VERSION}${plain}"
+    echo -e "  最新发布:     ${green}${latest_version}${plain}"
     echo -e "  仓库:         ${green}${REPO_OWNER}/${REPO_NAME}${plain}"
     echo ""
     
@@ -801,7 +800,7 @@ do_install() {
     configure_firewall "${panel_port}"
 
     # 8. 显示完成信息
-    echo -e "${green}安装完成！使用 x-ui 命令打开管理菜单。${plain}"
+    echo -e "${green}安装完成！运行 x-ui 命令打开管理菜单。${plain}"
     echo -e "${yellow}提示: 如需 SSL 证书，请运行 x-ui 后选择 SSL 证书管理选项。${plain}"
 }
 

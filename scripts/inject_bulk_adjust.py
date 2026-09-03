@@ -2,17 +2,20 @@
 """
 inject_bulk_adjust.py — Patch upstream client_bulk.go BulkAdjust() so that
 "unlimited" (expiry=0 / total=0) clients are no longer skipped when the
-admin wants to **set** a positive value.
+admin wants to **set** a positive value, and traffic adjustment uses
+**absolute overwrite** (set cap) instead of additive mode.
 
 Upstream behaviour (problematic):
   - ExpiryTime == 0  -> skip with "unlimited expiry"
   - TotalGB   == 0  -> skip with "unlimited traffic"
+  - TotalGB   >  0  -> additive: new = old + add (user wants absolute cap)
 
 New behaviour (saeson fix):
   - ExpiryTime == 0 and addDays > 0  -> set to time.Now() + addExpiryMs
-  - TotalGB   == 0 and addBytes > 0 -> set to addBytes (absolute)
-  - TotalGB   >  0                  -> keep additive (rec.TotalGB + addBytes)
+  - TotalGB   == 0 and addBytes > 0 -> set to addBytes (absolute cap)
+  - TotalGB   >  0 and addBytes != 0 -> set to addBytes (absolute overwrite)
   - Negative adjustments on unlimited -> still skip (cannot reduce from zero)
+  - addBytes == 0 on non-unlimited   -> no-op (no change)
 
 Usage:
     python3 inject_bulk_adjust.py <build_root>
@@ -133,9 +136,11 @@ def patch_bulk_adjust(filepath):
 \t\t\t\t\t}
 \t\t\t\t}
 \t\t\t} else {
-\t\t\t\tnext := max(rec.TotalGB+addBytes, 0)
-\t\t\t\tentry.applyTotal = true
-\t\t\t\tentry.newTotal = next
+\t\t\t\t// saeson: absolute overwrite (set cap), NOT additive
+\t\t\t\tif addBytes != 0 {
+\t\t\t\t\tentry.applyTotal = true
+\t\t\t\t\tentry.newTotal = addBytes
+\t\t\t\t}
 \t\t\t}"""
 
     if old_traffic_block not in content:

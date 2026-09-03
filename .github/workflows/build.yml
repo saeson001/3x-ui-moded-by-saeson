@@ -94,6 +94,7 @@ jobs:
           cp /tmp/saeson-mod/scripts/inject_saeson_routes.py scripts/
           cp /tmp/saeson-mod/scripts/inject_xray_versions.py scripts/
           cp /tmp/saeson-mod/scripts/inject_bulk_adjust.py scripts/
+          cp /tmp/saeson-mod/scripts/inject_client_inbound_apply.py scripts/
           # Restore custom x-ui.sh
           cp /tmp/saeson-mod/x-ui.sh . 2>/dev/null || true
 
@@ -171,6 +172,11 @@ jobs:
         run: |
           python3 scripts/inject_bulk_adjust.py .
           echo "BulkAdjust unlimited-client fix injected"
+
+      - name: Inject client_inbound_apply nil-clients guard
+        run: |
+          python3 scripts/inject_client_inbound_apply.py .
+          echo "client_inbound_apply nil-clients guard injected"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -316,8 +322,13 @@ jobs:
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
 
+            ### v1.5.0 更新（流量绝对值模式 + 删除节点修复 + 安装文字优化）
+            - **批量修改流量 = 设定上限（覆盖模式）**：设 50G → 总量变 50G，不管原来多少。不再累加
+            - **删除入站节点不再报 "invalid clients format"**：当入站 settings.clients 为 null/缺失时，自动视为空数组处理（注入 `scripts/inject_client_inbound_apply.py` patch 上游 `client_inbound_apply.go` 两处断言点）
+            - **安装脚本文字优化**：版本显示更清晰（区分面板内核版本 vs 定制版版本），功能描述更新为完整列表
+
             ### v1.4.9 更新（批量调整支持无限客户端）
-            - **批量设置时长/流量不再跳过无限客户端**：上游 `BulkAdjust` 原逻辑对 `expiryTime=0`（无限期）或 `totalGB=0`（无限流量）的客户端直接跳过。现在改为：设正值时**从当前时间开始设定**（时长）或**直接设为该值**（流量）；非无限客户端的流量仍为**累加模式**（原 100G + 设 50G = 150G）。负值调整对无限客户端仍跳过（无法从零减少）
+            - **批量设置时长/流量不再跳过无限客户端**：上游 `BulkAdjust` 原逻辑对 `expiryTime=0`（无限期）或 `totalGB=0`（无限流量）的客户端直接跳过。现在改为：设正值时**从当前时间开始设定**（时长）或**直接设为该绝对值**（流量上限）；流量调整统一为**覆盖模式**（设 50G → 总量 50G）。负值调整对无限客户端仍跳过（无法从零减少）
             - **注入脚本**：`scripts/inject_bulk_adjust.py` 在 CI 阶段 patch 上游 `internal/web/service/client_bulk.go` 的 `BulkAdjust()` 函数
 
             ### v1.4.8 更新（批量设置关联入站 + 全局流量计数重置）
