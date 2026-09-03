@@ -78,6 +78,10 @@ jobs:
 
           # Copy upstream source to build root
           cp -a upstream-src/. .
+          # Capture the upstream base version (for "based on" display in the UI)
+          BASE_VER="$(cat upstream-src/internal/config/version 2>/dev/null | tr -d '[:space:]')"
+          BASE_VER="${BASE_VER:-v3.4.2}"
+          echo "Upstream base version: ${BASE_VER}"
           rm -rf upstream-src
 
           # Restore our custom files
@@ -121,11 +125,14 @@ jobs:
             cp -f frontend-patches/pages/index/PanelUpdateModal.tsx frontend/src/pages/index/PanelUpdateModal.tsx
             # saeson v1.3.7: inject mod version (from VERSION file) into patched files
             MOD_VER="$(cat VERSION)"
-            sed -i "s/__SAESON_MOD_VERSION__/${MOD_VER}/g" \
+            # saeson: report the mod version as the panel's own version so the WebUI
+            # sidebar/dashboard card, `x-ui version` CLI and /api/version all show it
+            printf '%s' "$MOD_VER" > internal/config/version
+            sed -i "s/__SAESON_MOD_VERSION__/${MOD_VER}/g; s/__SAESON_BASE_VERSION__/${BASE_VER}/g" \
               frontend/src/layouts/AppSidebar.tsx \
               frontend/src/pages/index/IndexPage.tsx \
               frontend/src/pages/index/PanelUpdateModal.tsx
-            echo "saeson mod version injected: ${MOD_VER}"
+            echo "saeson mod version injected: ${MOD_VER} (based on ${BASE_VER})"
             echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall + inbound columns + fork version branding)"
           fi
 
@@ -322,6 +329,10 @@ jobs:
           name: "3x-ui moded by saeson ${{ github.ref_name }}"
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
+
+            ### v1.5.1 更新（时长绝对值 + WebUI 版本号统一为 mod 版本）
+            - **批量设置时长也改为绝对值模式**：设 30 天 → 到期时间变为「现在 + 30 天」，不管原来剩多少（此前为累加，原到期 + 30 天）。无限期客户端设正天数同样从当前时间起算。与流量调整一致，均为覆盖/绝对值语义
+            - **WebUI 左下版本号统一显示为 mod 版本（基于上游版本）**：① 后端 `internal/config/version` 在构建时覆盖为 mod 版本，使 `x-ui version` CLI、`/api/version`、WebUI 各处均显示 `v1.5.1`；② 侧边栏底栏徽章永远显示 mod 版本（去掉对运行时注入变量的依赖），悬停提示「saeson mod v1.5.1 · 基于 3.4.2」；③ 仪表盘 3X-UI 卡片主标签显示 `saeson v1.5.1`，副标签显示「基于 3.4.2」
 
             ### v1.5.0 更新（流量绝对值模式 + 删除节点修复 + 安装文字优化）
             - **批量修改流量 = 设定上限（覆盖模式）**：设 50G → 总量变 50G，不管原来多少。不再累加

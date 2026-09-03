@@ -34,7 +34,6 @@ import {
 } from '@ant-design/icons';
 
 import { HttpUtil } from '@/utils';
-import { formatPanelVersion } from '@/lib/panel-version';
 import { pauseAnimationsUntilLeave, useTheme } from '@/hooks/useTheme';
 import { useAllSettings } from '@/api/queries/useAllSettings';
 import './AppSidebar.css';
@@ -44,6 +43,7 @@ const DONATE_URL = 'https://donate.sanaei.dev/';
 const DOCS_URL = 'https://docs.sanaei.dev/';
 // saeson mod: sidebar version badge points to our fork, not upstream
 const SAESON_MOD_VERSION = '__SAESON_MOD_VERSION__';
+const SAESON_BASE_VERSION = '__SAESON_BASE_VERSION__';
 const REPO_URL = 'https://github.com/saeson001/3x-ui-moded-by-saeson';
 const LOGOUT_KEY = '__logout__';
 
@@ -102,11 +102,11 @@ function DocsButton({ ariaLabel }: { ariaLabel: string }) {
   );
 }
 
-// saeson mod: show the mod version (e.g. v1.3.7) with the upstream base in the tooltip
-function VersionBadge({ version, collapsed }: { version: string; collapsed?: boolean }) {
-  if (!version) return null;
+// saeson mod: always show the mod version at the sidebar footer, with the
+// upstream base version noted in the tooltip ("based on").
+function VersionBadge({ collapsed }: { collapsed?: boolean }) {
   const label = SAESON_MOD_VERSION;
-  const tip = `saeson mod ${SAESON_MOD_VERSION} · upstream ${formatPanelVersion(version) || '?'}`;
+  const tip = `saeson mod ${SAESON_MOD_VERSION} · 基于 ${SAESON_BASE_VERSION}`;
   return (
     <a
       href={REPO_URL}
@@ -156,7 +156,6 @@ export default function AppSidebar() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const currentTheme: 'light' | 'dark' = isDark ? 'dark' : 'light';
-  const panelVersion = window.X_UI_CUR_VER || '';
 
   const tabs = useMemo<{ key: string; icon: IconName; title: string }[]>(() => [
     { key: '/', icon: 'dashboard', title: t('menu.dashboard') },
@@ -306,7 +305,7 @@ export default function AppSidebar() {
           onClick={onMenuClick}
         />
         <div className="sider-footer">
-          <VersionBadge version={panelVersion} collapsed={collapsed} />
+          <VersionBadge collapsed={collapsed} />
         </div>
       </Layout.Sider>
 
@@ -366,7 +365,7 @@ export default function AppSidebar() {
           onClick={(info) => { onMenuClick(info); setDrawerOpen(false); }}
         />
         <div className="drawer-footer">
-          <VersionBadge version={panelVersion} />
+          <VersionBadge />
         </div>
       </Drawer>
 

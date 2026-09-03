@@ -7,15 +7,17 @@ admin wants to **set** a positive value, and traffic adjustment uses
 
 Upstream behaviour (problematic):
   - ExpiryTime == 0  -> skip with "unlimited expiry"
+  - ExpiryTime >  0  -> additive: new = old_expiry + addDays (user wants absolute)
   - TotalGB   == 0  -> skip with "unlimited traffic"
   - TotalGB   >  0  -> additive: new = old + add (user wants absolute cap)
 
 New behaviour (saeson fix):
-  - ExpiryTime == 0 and addDays > 0  -> set to time.Now() + addExpiryMs
+  - ExpiryTime == 0 and addDays > 0  -> set to time.Now() + addExpiryMs (absolute)
+  - ExpiryTime >  0 and addDays != 0 -> set to time.Now() + addExpiryMs (absolute, NOT additive)
   - TotalGB   == 0 and addBytes > 0 -> set to addBytes (absolute cap)
   - TotalGB   >  0 and addBytes != 0 -> set to addBytes (absolute overwrite)
   - Negative adjustments on unlimited -> still skip (cannot reduce from zero)
-  - addBytes == 0 on non-unlimited   -> no-op (no change)
+  - addBytes == 0 / addDays == 0      -> no-op (no change)
 
 Usage:
     python3 inject_bulk_adjust.py <build_root>
@@ -82,7 +84,70 @@ def patch_bulk_adjust(filepath):
         return False
 
     content = content.replace(old_expiry_block, new_expiry_block, 1)
-    print("[1/2] Patched expiry block: unlimited clients can now be set with positive days.")
+    print("[1/3] Patched expiry block: unlimited clients can now be set with positive days.")
+
+    # ================================================================
+    # Patch 3: Expiry — when ExpiryTime > 0 and addDays != 0, SET it
+    #          absolutely (now + addDays), NOT additively (old + addDays).
+    # ================================================================
+    # Original:
+    #   case rec.ExpiryTime > 0:
+    #       next := rec.ExpiryTime + addExpiryMs
+    #       if next <= 0 {
+    #           if _, exists := skippedReasons[email]; !exists {
+    #               skippedReasons[email] = "reduction exceeds remaining time"
+    #           }
+    #       } else {
+    #           entry.applyExpiry = true
+    #           entry.newExpiry = next
+    #       }
+    #
+    # Replacement:
+    #   case rec.ExpiryTime > 0:
+    #       // saeson: absolute mode — set expiry to now + addDays (not additive)
+    #       next := time.Now().UnixMilli() + addExpiryMs
+    #       if next <= 0 {
+    #           if _, exists := skippedReasons[email]; !exists {
+    #               skippedReasons[email] = "reduction exceeds remaining time"
+    #           }
+    #       } else {
+    #           entry.applyExpiry = true
+    #           entry.newExpiry = next
+    #       }
+
+    old_expiry_limited_block = """\t\t\tcase rec.ExpiryTime > 0:
+\t\t\t\tnext := rec.ExpiryTime + addExpiryMs
+\t\t\t\tif next <= 0 {
+\t\t\t\t\tif _, exists := skippedReasons[email]; !exists {
+\t\t\t\t\t\tskippedReasons[email] = "reduction exceeds remaining time"
+\t\t\t\t\t}
+\t\t\t\t} else {
+\t\t\t\t\tentry.applyExpiry = true
+\t\t\t\t\tentry.newExpiry = next
+\t\t\t\t}"""
+
+    new_expiry_limited_block = """\t\t\tcase rec.ExpiryTime > 0:
+\t\t\t\t// saeson: absolute mode — set expiry to now + addDays (not additive)
+\t\t\t\tnext := time.Now().UnixMilli() + addExpiryMs
+\t\t\t\tif next <= 0 {
+\t\t\t\t\tif _, exists := skippedReasons[email]; !exists {
+\t\t\t\t\t\tskippedReasons[email] = "reduction exceeds remaining time"
+\t\t\t\t\t}
+\t\t\t\t} else {
+\t\t\t\t\tentry.applyExpiry = true
+\t\t\t\t\tentry.newExpiry = next
+\t\t\t\t}"""
+
+    if old_expiry_limited_block not in content:
+        if "saeson: absolute mode" in content:
+            print("[2/3] Expiry limited block already patched. Skipping.")
+        else:
+            print("ERROR: Could not find the expiry limited (>0) block.")
+            print("The upstream BulkAdjust may have changed. Aborting.")
+            return False
+
+    content = content.replace(old_expiry_limited_block, new_expiry_limited_block, 1)
+    print("[2/3] Patched expiry >0 block: limited clients now use absolute mode (now + days).")
 
     # ================================================================
     # Patch 2: Traffic — when TotalGB == 0 and addBytes > 0, SET it
@@ -149,7 +214,7 @@ def patch_bulk_adjust(filepath):
         return False
 
     content = content.replace(old_traffic_block, new_traffic_block, 1)
-    print("[2/2] Patched traffic block: unlimited clients can now be set with positive bytes.")
+    print("[3/3] Patched traffic block: unlimited clients can now be set with positive bytes.")
 
     # Add a marker at the top of the function for idempotency
     marker = "\t// saeson: allow setting expiry/traffic for unlimited clients\n"
