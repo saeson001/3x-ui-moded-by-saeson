@@ -19,12 +19,6 @@ jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
-    # saeson mod: compile inside Debian 11 (bullseye, glibc 2.31) so the produced
-    # binary runs on Debian 11/12 and Ubuntu 20.04+. The default ubuntu-latest
-    # (glibc 2.34+) produces binaries that fail on Debian 11 with
-    # "GLIBC_2.32/2.33/2.34 not found".
-    container:
-      image: debian:bullseye
     strategy:
       fail-fast: false
       matrix:
@@ -36,14 +30,6 @@ jobs:
             xray_arch: 64
 
     steps:
-      - name: Install container build dependencies
-        run: |
-          apt-get update -qq
-          apt-get install -y -q git curl wget tar ca-certificates unzip python3 \
-            gcc libc6-dev libsqlite3-dev pkg-config
-          git config --global --add safe.directory '*' || true
-          echo "Container glibc: $(ldd --version | head -1)"
-
       - name: Checkout modified source
         uses: actions/checkout@v4
 
@@ -51,78 +37,57 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: MHSanaei/3x-ui
-          # All our patches (frontend + web.go injections) are based on upstream v3.4.2.
-          # Upstream main has refactored the frontend (StatusCard/XrayStatusCard removed),
-          # so pin to v3.4.2 unless a new upstream version is explicitly specified.
-          ref: ${{ github.event.inputs.upstream_version || 'v3.4.2' }}
+          # When triggered by workflow_dispatch, use the specified upstream version.
+          # When triggered by our tag push, default to upstream main branch.
+          ref: ${{ github.event.inputs.upstream_version || 'main' }}
           path: upstream-src
 
       - name: Prepare build directory
         run: |
           # Save our custom files before copying upstream
-          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/internal/web/controller /tmp/saeson-mod/internal/clash_link /tmp/saeson-mod/internal/netstats /tmp/saeson-mod/internal/firewall /tmp/saeson-mod/scripts
+          mkdir -p /tmp/saeson-mod/internal/web/service /tmp/saeson-mod/internal/web/controller /tmp/saeson-mod/internal/clash_link /tmp/saeson-mod/scripts
           cp internal/web/service/reality_fix.go /tmp/saeson-mod/internal/web/service/ 2>/dev/null || true
           cp internal/web/controller/clash_link_routes.go /tmp/saeson-mod/internal/web/controller/ 2>/dev/null || true
-          cp internal/web/controller/saeson_routes.go /tmp/saeson-mod/internal/web/controller/ 2>/dev/null || true
           cp internal/clash_link/*.go /tmp/saeson-mod/internal/clash_link/ 2>/dev/null || true
-          cp internal/netstats/*.go /tmp/saeson-mod/internal/netstats/ 2>/dev/null || true
-          cp internal/firewall/*.go /tmp/saeson-mod/internal/firewall/ 2>/dev/null || true
           cp scripts/inject_reality_fix.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_clash_link.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
-          cp scripts/inject_saeson_routes.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
-          cp scripts/inject_xray_versions.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           # Save our custom x-ui.sh (with Clash Link info in option 4)
           cp x-ui.sh /tmp/saeson-mod/ 2>/dev/null || true
-
+          
           # Copy upstream source to build root
           cp -a upstream-src/. .
           rm -rf upstream-src
-
+          
           # Restore our custom files
           cp /tmp/saeson-mod/internal/web/service/reality_fix.go internal/web/service/
           cp /tmp/saeson-mod/internal/web/controller/clash_link_routes.go internal/web/controller/
-          cp /tmp/saeson-mod/internal/web/controller/saeson_routes.go internal/web/controller/
           mkdir -p internal/clash_link
           cp /tmp/saeson-mod/internal/clash_link/*.go internal/clash_link/
-          mkdir -p internal/netstats internal/firewall
-          cp /tmp/saeson-mod/internal/netstats/*.go internal/netstats/
-          cp /tmp/saeson-mod/internal/firewall/*.go internal/firewall/
           mkdir -p scripts
           cp /tmp/saeson-mod/scripts/inject_reality_fix.py scripts/
           cp /tmp/saeson-mod/scripts/inject_clash_link.py scripts/
-          cp /tmp/saeson-mod/scripts/inject_saeson_routes.py scripts/
-          cp /tmp/saeson-mod/scripts/inject_xray_versions.py scripts/
           # Restore custom x-ui.sh
           cp /tmp/saeson-mod/x-ui.sh . 2>/dev/null || true
-
+          
+          # Apply source-level patches (unified diff format)
+          if [ -d patches ]; then
+            for p in patches/*.patch; do
+              if [ -f "$p" ]; then
+                echo "Applying patch: $p"
+                git apply --whitespace=fix "$p" || echo "WARNING: Patch $p failed to apply (may need update for current upstream)"
+              fi
+            done
+            echo "Source patches applied"
+          fi
+          
           # Apply frontend patches (Clash subscription in QR modal)
           if [ -d frontend-patches ]; then
             cp -f frontend-patches/pages/inbounds/qr/QrCodeModal.tsx frontend/src/pages/inbounds/qr/QrCodeModal.tsx
             cp -f frontend-patches/pages/clients/ClientQrModal.tsx frontend/src/pages/clients/ClientQrModal.tsx
-            cp -f frontend-patches/pages/clients/ClientResetModal.tsx frontend/src/pages/clients/ClientResetModal.tsx
-            # saeson: traffic breakdown + firewall cards on dashboard
-            cp -f frontend-patches/pages/index/IndexPage.tsx frontend/src/pages/index/IndexPage.tsx
-            cp -f frontend-patches/pages/index/SaesonTrafficCard.tsx frontend/src/pages/index/SaesonTrafficCard.tsx
-            cp -f frontend-patches/pages/index/SaesonFirewallCard.tsx frontend/src/pages/index/SaesonFirewallCard.tsx
-            # saeson v1.3.9: historical traffic card (per inbound / per client, 24h/7d/1mo/1yr)
-            cp -f frontend-patches/pages/index/SaesonTrafficHistoryCard.tsx frontend/src/pages/index/SaesonTrafficHistoryCard.tsx
-            # saeson v1.3.4: inbound list column widths + centered headers
-            cp -f frontend-patches/pages/inbounds/list/useInboundColumns.tsx frontend/src/pages/inbounds/list/useInboundColumns.tsx
-            # saeson v1.3.7: sidebar version badge -> fork repo + mod version;
-            # panel update modal warning (official updater would overwrite the fork)
-            cp -f frontend-patches/layouts/AppSidebar.tsx frontend/src/layouts/AppSidebar.tsx
-            cp -f frontend-patches/pages/index/PanelUpdateModal.tsx frontend/src/pages/index/PanelUpdateModal.tsx
-            # saeson v1.3.7: inject mod version (from VERSION file) into patched files
-            MOD_VER="$(cat VERSION)"
-            sed -i "s/__SAESON_MOD_VERSION__/${MOD_VER}/g" \
-              frontend/src/layouts/AppSidebar.tsx \
-              frontend/src/pages/index/IndexPage.tsx \
-              frontend/src/pages/index/PanelUpdateModal.tsx
-            echo "saeson mod version injected: ${MOD_VER}"
-            echo "Frontend patches applied (Clash subscription + traffic breakdown + firewall + inbound columns + fork version branding)"
+            echo "Frontend patches applied (Clash subscription in QR modal)"
           fi
-
-          echo "Build directory prepared with clash_link + netstats + firewall modules"
+          
+          echo "Build directory prepared with clash_link module"
 
       - name: Copy Reality fix source file
         run: |
@@ -141,21 +106,6 @@ jobs:
         run: |
           python3 scripts/inject_clash_link.py . .
           echo "Clash Link injection complete"
-
-      - name: Inject saeson netstats + firewall modules
-        run: |
-          python3 scripts/inject_saeson_routes.py . .
-          echo "Saeson netstats + firewall injection complete"
-
-      - name: Inject client scheduled-reset UI
-        run: |
-          python3 scripts/inject_client_reset.py . .
-          echo "Client scheduled-reset UI injection complete"
-
-      - name: Inject Xray version list patch
-        run: |
-          python3 scripts/inject_xray_versions.py internal/web/service/server.go
-          echo "Xray version list patch injected"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -202,9 +152,6 @@ jobs:
           
           echo "=== Build complete ==="
           ls -lh x-ui
-
-          echo "=== Verify binary links against container glibc (Debian 11 / glibc 2.31) ==="
-          ldd x-ui | grep -E 'libc|libsqlite|not found' || true
 
       - name: Download xray-core
         run: |
@@ -299,53 +246,29 @@ jobs:
           body: |
             ## 3x-ui moded by saeson ${{ github.ref_name }}
 
-            ### v1.4.0 更新（客户端流量定时重置）
-            - **客户端流量定时重置（新功能）**：客户端页每行新增「流量定时重置」按钮（扫帚图标），可设置「每月 X 号 H 点」自动将该客户端流量清零。复用面板原生重置逻辑（`ClientService.ResetTrafficByEmail`），同时重置 DB 计数与 Xray 内存计数器，并自动启用被禁用的客户端。日期超过当月天数自动取月末。后台每分钟巡检，到点或错过时点当日均会补执行。后端独立表 `saeson_client_reset` + 4 个鉴权 API（`/panel/api/client-reset/{list,set,remove,reset-now}`）；支持「立即重置」手动触发
-            - **客户端页原生能力提醒**：到期时间 / 总流量(流量上限) / 关联入站 / 续费周期(每 N 天滚动重置) 均为上游 3.4.2 客户端编辑弹窗「基础信息」页签自带字段，无需额外开发；本次新增的「定时重置」为上游 3.7 才有的「按日历日重置」能力的 3.4.2 移植版
-
-            ### v1.3.9 更新
-            - **流量时段统计 (新功能)**: 仪表盘新增「流量时段统计」卡片。可按「节点」或「用户」切换，并查看 **24小时内 / 7天内 / 1月内 / 1年内** 的上传/下载流量（分组柱状图 + 累计数值）。后端每 5 分钟采样各入站与各客户端的累计流量并存储小时差值，查询时按所选时段聚合（24h→每小时、7d→每6小时、1mo→每天、1yr→每月）。Xray 重启导致计数器清零会显示为静默时段而非负尖峰
-            - **后端**: 新增 `internal/trafficlog` 模块（独立 `saeson_traffic_log` 表，AutoMigrate 自动建表）+ `/panel/api/traffic/targets` 与 `/panel/api/traffic/history` 两个鉴权 API；`inject_saeson_routes.py` 同步复制该模块
-
-            ### v1.3.8 更新
-            - **构建兼容性修复 (关键)**: 改用 Debian 11 (bullseye, glibc 2.31) 容器编译，产出的面板二进制现在兼容 Debian 11 / 12 及 Ubuntu 20.04+（此前 ubuntu-latest 编译的二进制需要 GLIBC_2.32/2.33/2.34，在 Debian 11 上直接启动失败 `version GLIBC_2.xx not found`）
-
-            ### v1.3.7 更新
-            - **版本显示区分**: 侧边栏底部版本徽章改为 fork 版本号并链接到 saeson 仓库（悬停显示上游基线版本）；仪表盘 3X-UI 卡片移至最底部且默认折叠；面板更新弹窗顶部增加红色警告（官方更新器会覆盖修改版）并显示 saeson mod 版本
-
-            ### v1.3.6 更新
-            - **Xray 版本切换列表扩展**: 面板内可切换的 Xray 版本从 3 个扩展到约 29 个（一年内全部版本，v25.8.29 ~ v26.7.28，含 v26.3.27）
-
-            ### v1.3.5 更新
-            - **列宽微调**: 入站列表流量列/速度列从 24 字符宽度收紧到 20 字符宽度（208px → 170px），其余列保持不变
-
-            ### v1.3.4 更新
-            - **入站列表列宽优化**: 所有列名居中显示；ID 列收紧到 5 位数字宽度，备注列 5 个汉字宽度（超长自动省略，悬停显示全名），端口列 5 位数字宽度，客户端列固定 8 字符宽度，流量/速度列固定 24 字符宽度
-            - **更新防挂死**: install.sh 所有下载命令增加连接超时（15 秒）、低速中止（<1KB/s 持续 60 秒）与自动重试（3 次），杜绝更新时服务已停止但下载无限挂起的问题
-
-            ### v1.3.3 更新
-            - **二维码弹窗记忆折叠**: 订阅类面板（订阅信息/订阅 JSON/Clash 订阅）不再记忆展开状态，重新打开时默认折叠，仅直链面板记忆上一次选择
-
-            ### 新功能 (v1.3.0)
-            - **流量构成区分**: 系统状态页新增「Xray 代理流量」与「系统流量（非代理）」卡片，与"整体速度"同款样式 —— 一眼看出 VPS 计费流量中多少走了代理、多少是 VPS 自身（SSH/扫描/其他服务）
-            - **防火墙一键管理**: 系统状态页新增「防火墙」卡片，一键开启仅放行 SSH / 面板 / 全部节点端口 / 自定义端口，其余入站一律拒绝（出站不受影响）；支持 ufw 与 firewalld 双后端
-            - **防锁定保护**: 开启防火墙前强制校验 SSH 端口与面板端口在放行列表，绝不把自己锁在外面
-            - **SSH 命令行防火墙菜单**: x-ui.sh 选项 23 全面增强 —— 一键安全开启（自动收集 SSH/面板/节点端口）、同步节点端口、多后端支持
-
-            ### 既有功能
+            ### 修复内容
             - **External Proxy + REALITY Bug 修复 (Go 源码级)**: 修复了 VLESS+REALITY 入站启用 External Proxy 时，xray config.json 中 publicKey 和 fingerprint 被清空为 null 的问题
-            - **Clash Link 订阅**: 一键生成 Clash Party 配置链接，多节点聚合，Token URL 订阅
-            - **REALITY 参数修复**: 正确输出 public-key、short-id、fingerprint、servername 等 REALITY 参数
 
-            ### API 端点 (saeson mod)
-            - `GET /panel/api/netstats` — 网卡/Xray/系统流量速率与累计
-            - `GET /panel/api/firewall/status` — 防火墙状态与放行端口
-            - `POST /panel/api/firewall/enable` — 一键开启防火墙
-            - `POST /panel/api/firewall/disable` — 关闭防火墙
-            - `POST /panel/api/firewall/sync` — 同步节点端口
-            - `POST /panel/api/firewall/ports` — 添加/移除自定义端口
+            ### 新功能 (Clash Link 订阅)
+            - **一键生成 Clash Party 配置链接**: 从 3x-ui 入站节点直接生成 Clash Meta YAML 配置文件
+            - **VLESS+REALITY 完整兼容**: 正确输出 public-key、short-id、fingerprint、servername 等 REALITY 参数
+            - **多节点聚合**: 将多个 3x-ui 入站合并到一个 Clash 配置文件中
+            - **Token URL**: 生成固定链接，可直接粘贴到 Clash Party 作为订阅地址
+            - **配置备份导出**: 一键导出所有入站、客户端、Host 等设置到 JSON 文件
+
+            ### 增强 (v1.2.2)
+            - **x-ui 命令选项 4 增强**: 现在显示服务器 IP、面板 URL、账号密码、Clash Link API 端点等完整信息，无需再手动翻找
+            - **chmod 修复**: 安装脚本增加 x-ui.sh 可执行权限设置
+
+            ### API 端点
             - `POST /panel/api/clash-link/generate` — 生成 Clash 配置链接
-            - `GET /d/:token` — 获取 Clash YAML 配置
+            - `GET /d/:token` — 获取 Clash YAML 配置（可直接粘贴到 Clash Party）
+            - `GET /panel/api/clash-link/backup` — 导出完整配置备份
+            - `GET /panel/api/clash-link/list` — 列出所有已生成的配置链接
+
+            ### 架构
+            - **linux-amd64**: 包含所有修复和功能的完整编译版
+            - **其他架构 (arm64/armv7/...)** : 请使用一键安装脚本，将自动使用上游二进制 + 运行时修复方案
 
             ### 一键安装
             ```bash

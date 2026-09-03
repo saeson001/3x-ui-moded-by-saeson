@@ -1,0 +1,83 @@
+# BatchAdjust: 支持对无限期/无限流量客户端进行批量调整
+
+## 问题
+当客户端的 ExpiryTime=0（无限期）或 TotalGB=0（无限流量）时，
+BulkAdjust 会直接跳过该客户端（reason: "unlimited expiry" / "unlimited traffic"）。
+这导致用户无法通过批量「调整」功能给无限期客户设置期限或流量配额。
+
+实际场景：管理员有 22 个无限期客户端，想统一加 148 天期限 →
+结果 22 个全部被跳过，只成功 1 个。
+
+## 根因
+上游 client_bulk.go 的 BulkAdjust() 函数中：
+
+```go
+case rec.ExpiryTime == 0:
+    skippedReasons[email] = "unlimited expiry"   // 直接跳过
+```
+
+设计意图是「不要意外把无限期变成有限期」，但管理员主动调整时应支持。
+
+## 修复
+
+### 行为变更
+
+| 场景 | 修复前 | 修复后 |
+|------|--------|--------|
+| addDays > 0, ExpiryTime == 0 (无限期) | 跳过 (unlimited expiry) | **设为 now + addDays**（从无限转为具体到期日） |
+| addDays < 0, ExpiryTime == 0 (无限期) | 跳过 (unlimited expiry) | 跳过（从无限减去天数无意义） |
+| addBytes > 0, TotalGB == 0 (无限流量) | 跳过 (unlimited traffic) | **设为 addBytes**（从无限转为具体配额） |
+| addBytes < 0, TotalGB == 0 (无限流量) | 跳过 (unlimited traffic) | 跳过（从无限减去流量无意义） |
+| ExpiryTime > 0 或 TotalGB > 0 (有限) | 正常增减 | 不变 |
+
+### 修改文件
+`internal/web/service/client_bulk.go`
+
+--- a/internal/web/service/client_bulk.go
++++ b/internal/web/service/client_bulk.go
+@@ -195,14 +195,22 @@ func (s *ClientService) BulkAdjust(...) {
+ 	plan := map[string]*bulkAdjustEntry{}
+ 	for email, rec := range recordsByEmail {
+ 		entry := &bulkAdjustEntry{record: rec}
+ 		if addDays != 0 {
+ 			switch {
+ 			case rec.ExpiryTime == 0:
+-				if _, exists := skippedReasons[email]; !exists {
+-					skippedReasons[email] = "unlimited expiry"
+-				}
++				if addDays > 0 {
++					// 无限期的客户端：正值天数为"从现在起 N 天后到期"
++					// （将无限期转为具体到期日，而非跳过）
++					entry.applyExpiry = true
++					entry.newExpiry = time.Now().UnixMilli() + addExpiryMs
++				} else {
++					// 负值天数对无意义（不能从"永不过期"减去天数）
++					if _, exists := skippedReasons[email]; !exists {
++						skippedReasons[email] = "unlimited expiry"
++					}
++				}
+ 			case rec.ExpiryTime > 0:
+ 				next := rec.ExpiryTime + addExpiryMs
+ 				if next <= 0 {
+@@ -217,10 +225,18 @@ func (s *ClientService) BulkAdjust(...) {
+ 		}
+ 		if addBytes != 0 {
+-			if rec.TotalGB == 0 {
+-				if _, exists := skippedReasons[email]; !exists {
+-					skippedReasons[email] = "unlimited traffic"
+-				}
++			if rec.TotalGB == 0 {
++				if addBytes > 0 {
++					// 无限流量的客户端：正值流量为"设为 N GB"
++					// （将无限流量转为具体配额，而非跳过）
++					entry.applyTotal = true
++					entry.newTotal = addBytes
++				} else {
++					// 负值流量对无限无意义
++					if _, exists := skippedReasons[email]; !exists {
++						skippedReasons[email] = "unlimited traffic"
++					}
++				}
+ 			} else {
+ 				next := rec.TotalGB + addBytes
+ 				if next <= 0 {
