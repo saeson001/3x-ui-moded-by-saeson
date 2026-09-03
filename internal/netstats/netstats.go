@@ -50,6 +50,42 @@ type sampler struct {
 
 var defaultSampler = &sampler{}
 
+// NIC baseline recorded at the last traffic reset. The kernel NIC counters
+// cannot be zeroed, so GetStats reports totals relative to this baseline, which
+// makes the "总数据" dashboard card restart from zero after a reset.
+var (
+	baselineMu   sync.Mutex
+	baselineSent uint64
+	baselineRecv uint64
+)
+
+// SetBaseline records the raw NIC byte counters at reset time.
+func SetBaseline(sent, recv uint64) {
+	baselineMu.Lock()
+	baselineSent, baselineRecv = sent, recv
+	baselineMu.Unlock()
+}
+
+// GetBaseline returns the currently recorded NIC baseline.
+func GetBaseline() (uint64, uint64) {
+	baselineMu.Lock()
+	defer baselineMu.Unlock()
+	return baselineSent, baselineRecv
+}
+
+// RawNIC returns the raw (unbaselined) NIC byte counters. Used by the traffic
+// reset module to snapshot the baseline at reset time.
+func RawNIC() (uint64, uint64, error) {
+	return nicTotals()
+}
+
+func clampSub(a, b uint64) uint64 {
+	if a > b {
+		return a - b
+	}
+	return 0
+}
+
 // isVirtualInterface mirrors upstream 3x-ui server.go so that our NIC totals
 // match the panel's "total data" card exactly.
 func isVirtualInterface(name string) bool {
@@ -116,13 +152,14 @@ func GetStats(db *gorm.DB) (*NetStats, error) {
 	}
 
 	s := defaultSampler
+	bs, br := GetBaseline()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
 	out := &NetStats{}
-	out.Net.Sent = sent
-	out.Net.Recv = recv
+	out.Net.Sent = clampSub(sent, bs)
+	out.Net.Recv = clampSub(recv, br)
 	out.Xray.UpTotal = xrayUp
 	out.Xray.DownTotal = xrayDown
 

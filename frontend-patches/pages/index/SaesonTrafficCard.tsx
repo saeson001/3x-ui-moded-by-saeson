@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Card, Col, Row, Statistic, Tooltip } from 'antd';
+import { Button, Card, Col, Row, Space, Statistic, Tooltip, message } from 'antd';
 import {
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -11,6 +11,9 @@ import {
 
 import { HttpUtil, SizeFormatter } from '@/utils';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+
+// 强制以 JSON 发送，避免被全局 axios 默认的 form-urlencoded 编码干扰。
+const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
 
 interface NetStatsObj {
   net: { up: number; down: number; sent: number; recv: number };
@@ -27,6 +30,8 @@ const smallStyle: CSSProperties = {
 export default function SaesonTrafficCard() {
   const { isMobile } = useMediaQuery();
   const [stats, setStats] = useState<NetStatsObj | null>(null);
+  const [messageApi, messageContextHolder] = message.useMessage();
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -45,11 +50,34 @@ export default function SaesonTrafficCard() {
     };
   }, []);
 
+  // 全局「重置计数」：清零 Xray 代理流量（面板记账列 + Xray 内存计数器）与
+  // 总数据（网卡基线偏移）。后端 /panel/api/traffic-reset/reset-now 实现。
+  const resetNow = async () => {
+    setResetting(true);
+    try {
+      const msg = (await HttpUtil.post(
+        '/panel/api/traffic-reset/reset-now',
+        {},
+        JSON_HEADERS,
+      )) as { success?: boolean; msg?: string };
+      if (msg?.success) {
+        messageApi.success('已立即重置全部流量计数');
+      } else {
+        messageApi.error(msg?.msg || '重置失败');
+      }
+    } catch {
+      messageApi.error('网络错误，请重试');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const xray = stats?.xray || { up: 0, down: 0, upTotal: 0, downTotal: 0 };
   const system = stats?.system || { up: 0, down: 0 };
 
   return (
     <>
+      {messageContextHolder}
       <Col xs={24} lg={12}>
         <Card
           title={
@@ -59,6 +87,13 @@ export default function SaesonTrafficCard() {
                 <QuestionCircleOutlined style={{ opacity: 0.5 }} />
               </Tooltip>
             </span>
+          }
+          extra={
+            <Space size={4}>
+              <Button size="small" loading={resetting} onClick={resetNow}>
+                重置计数
+              </Button>
+            </Space>
           }
           hoverable
         >

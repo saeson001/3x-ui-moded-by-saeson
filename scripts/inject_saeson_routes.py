@@ -106,6 +106,10 @@ def main():
               os.path.join(build_root, 'internal', 'trafficlog'))
     copy_tree(os.path.join(project_root, 'internal', 'clientreset'),
               os.path.join(build_root, 'internal', 'clientreset'))
+    copy_tree(os.path.join(project_root, 'internal', 'inboundassoc'),
+              os.path.join(build_root, 'internal', 'inboundassoc'))
+    copy_tree(os.path.join(project_root, 'internal', 'trafficreset'),
+              os.path.join(build_root, 'internal', 'trafficreset'))
     # Controller file lives under internal/web/controller in our repo too,
     # but the CI prepare step already copies it; still handle standalone case.
     ctrl_src = os.path.join(project_root, 'internal', 'web', 'controller', 'saeson_routes.go')

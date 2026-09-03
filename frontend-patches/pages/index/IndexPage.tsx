@@ -52,6 +52,7 @@ import XrayStatusCard from './XrayStatusCard';
 import SaesonTrafficCard from './SaesonTrafficCard';
 import SaesonFirewallCard from './SaesonFirewallCard';
 import SaesonTrafficHistoryCard from './SaesonTrafficHistoryCard';
+const SaesonTrafficResetModal = lazy(() => import('./SaesonTrafficResetModal'));
 import type { PanelUpdateInfo } from './PanelUpdateModal';
 const JsonEditor = lazy(() => import('@/components/form/JsonEditor'));
 const PanelUpdateModal = lazy(() => import('./PanelUpdateModal'));
@@ -65,6 +66,9 @@ import './IndexPage.css';
 
 // saeson mod version, injected at build time (see build.yml)
 const SAESON_MOD_VERSION = '__SAESON_MOD_VERSION__';
+
+// 强制以 JSON 发送，避免被全局 axios 默认的 form-urlencoded 编码干扰。
+const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
 
 export default function IndexPage() {
   const { t } = useTranslation();
@@ -91,6 +95,9 @@ export default function IndexPage() {
   const [xrayMetricsOpen, setXrayMetricsOpen] = useState(false);
   const [xrayLogsOpen, setXrayLogsOpen] = useState(false);
   const [versionOpen, setVersionOpen] = useState(false);
+  const [trafficResetOpen, setTrafficResetOpen] = useState(false);
+  const [netTotals, setNetTotals] = useState<{ sent: number; recv: number }>({ sent: 0, recv: 0 });
+  const [resetting, setResetting] = useState(false);
   const [configTextOpen, setConfigTextOpen] = useState(false);
   const [configText, setConfigText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -106,6 +113,44 @@ export default function IndexPage() {
       if (msg?.success && msg.obj) setPanelUpdateInfo(msg.obj);
     });
   }, []);
+
+  // saeson: poll baselined NIC totals for the "总数据" card so a traffic reset
+  // (which snapshots a NIC baseline) visibly restarts it from zero.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      HttpUtil.get<{ success?: boolean; obj?: { net?: { sent: number; recv: number } } }>('/panel/api/netstats')
+        .then((msg) => {
+          if (alive && msg?.success && msg.obj?.net) {
+            setNetTotals({ sent: msg.obj.net.sent, recv: msg.obj.net.recv });
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 2000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // 全局「重置计数」：清零 Xray 代理流量 + 总数据两张卡片。
+  const resetAllTraffic = async () => {
+    setResetting(true);
+    try {
+      const msg = (await HttpUtil.post('/panel/api/traffic-reset/reset-now', {}, JSON_HEADERS)) as {
+        success?: boolean;
+        msg?: string;
+      };
+      if (msg?.success) {
+        messageApi.success('已立即重置全部流量计数');
+      } else {
+        messageApi.error(msg?.msg || '重置失败');
+      }
+    } catch {
+      messageApi.error('网络错误，请重试');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const displayVersion = useMemo(
     () => window.X_UI_CUR_VER || panelUpdateInfo.currentVersion || '?',
@@ -327,19 +372,32 @@ export default function IndexPage() {
                   </Col>
 
                   <Col xs={24} lg={12}>
-                    <Card title={t('pages.index.totalData')} hoverable>
+                    <Card
+                      title={t('pages.index.totalData')}
+                      hoverable
+                      extra={
+                        <Space size={4}>
+                          <Button size="small" loading={resetting} onClick={resetAllTraffic}>
+                            重置计数
+                          </Button>
+                          <Button size="small" type="link" onClick={() => setTrafficResetOpen(true)}>
+                            定时
+                          </Button>
+                        </Space>
+                      }
+                    >
                       <Row gutter={isMobile ? [8, 8] : 0}>
                         <Col span={12}>
                           <Statistic
                             title={t('pages.index.sent')}
-                            value={SizeFormatter.sizeFormat(status.netTraffic.sent)}
+                            value={SizeFormatter.sizeFormat(netTotals.sent)}
                             prefix={<CloudUploadOutlined />}
                           />
                         </Col>
                         <Col span={12}>
                           <Statistic
                             title={t('pages.index.received')}
-                            value={SizeFormatter.sizeFormat(status.netTraffic.recv)}
+                            value={SizeFormatter.sizeFormat(netTotals.recv)}
                             prefix={<CloudDownloadOutlined />}
                           />
                         </Col>
@@ -554,6 +612,10 @@ export default function IndexPage() {
               readOnly
             />
           </Modal>
+        </LazyMount>
+
+        <LazyMount when={trafficResetOpen}>
+          <SaesonTrafficResetModal open={trafficResetOpen} onOpenChange={setTrafficResetOpen} />
         </LazyMount>
       </Layout>
     </ConfigProvider>
