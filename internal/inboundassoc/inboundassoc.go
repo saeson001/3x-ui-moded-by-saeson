@@ -21,16 +21,17 @@ import (
 var errEmpty = errors.New("emails and inboundIds are required")
 
 var (
-	clientSvc  *service.ClientService
+	clientSvc  service.ClientService
 	inboundSvc service.InboundService
 )
 
 // Start captures the upstream services. Safe to call once at boot.
-func Start(cs *service.ClientService, is *service.InboundService) {
+// Services are passed by value to match the upstream clientreset.Start
+// convention (api.inboundController.clientService is a value, not a pointer).
+// ClientService is an empty struct upstream, so copying is safe.
+func Start(cs service.ClientService, is service.InboundService) {
 	clientSvc = cs
-	if is != nil {
-		inboundSvc = *is
-	}
+	inboundSvc = is
 }
 
 // Set replaces each client's associated inbounds with exactly inboundIds.

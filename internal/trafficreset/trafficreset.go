@@ -40,13 +40,16 @@ func (SaesonTrafficReset) TableName() string { return "saeson_traffic_reset" }
 
 var (
 	mu         sync.Mutex
-	clientSvc  *service.ClientService
+	clientSvc  service.ClientService
 	inboundSvc service.InboundService
 )
 
 // Start migrates the table, captures the upstream services, loads the persisted
 // NIC baseline into netstats, and launches the per-minute scheduler.
-func Start(db *gorm.DB, cs *service.ClientService, is *service.InboundService) {
+// Services are passed by value to match the upstream clientreset.Start
+// convention (api.inboundController.clientService is a value, not a pointer).
+// ClientService is an empty struct upstream, so copying is safe.
+func Start(db *gorm.DB, cs service.ClientService, is service.InboundService) {
 	if db == nil {
 		return
 	}
@@ -56,9 +59,7 @@ func Start(db *gorm.DB, cs *service.ClientService, is *service.InboundService) {
 	}
 	mu.Lock()
 	clientSvc = cs
-	if is != nil {
-		inboundSvc = *is
-	}
+	inboundSvc = is
 	mu.Unlock()
 
 	var row SaesonTrafficReset
