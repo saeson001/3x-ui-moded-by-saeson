@@ -53,10 +53,21 @@ jobs:
           cp scripts/inject_clash_link.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           # Save our custom x-ui.sh (with Clash Link info in option 4)
           cp x-ui.sh /tmp/saeson-mod/ 2>/dev/null || true
+          # Save our custom version (fork version number)
+          cp VERSION /tmp/saeson-mod/VERSION 2>/dev/null || true
           
           # Copy upstream source to build root
           cp -a upstream-src/. .
           rm -rf upstream-src
+          
+          # Save upstream base version before overwriting
+          UPSTREAM_VER=$(cat version 2>/dev/null | tr -d '[:space:]')
+          echo "Upstream base version: ${UPSTREAM_VER}"
+          
+          # Set our custom panel version (includes upstream base for clarity)
+          MOD_VER=$(cat /tmp/saeson-mod/VERSION 2>/dev/null | tr -d '[:space:]')
+          echo "${MOD_VER} (based on ${UPSTREAM_VER})" > version
+          echo "Panel version set to: $(cat version)"
           
           # Restore our custom files
           cp /tmp/saeson-mod/internal/web/service/reality_fix.go internal/web/service/
