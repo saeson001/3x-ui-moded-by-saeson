@@ -122,7 +122,7 @@ def patch_bulk_adjust(filepath):
 \t\t\t\tentry.newTotal = next
 \t\t\t}"""
 
-    new_traffic_block = """\t\t\tif rec.TotalGB == 0:
+    new_traffic_block = """\t\t\tif rec.TotalGB == 0 {
 \t\t\t\t// saeson: allow setting traffic limit for unlimited clients
 \t\t\t\tif addBytes > 0 {
 \t\t\t\t\tentry.applyTotal = true
