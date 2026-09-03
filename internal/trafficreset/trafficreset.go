@@ -139,9 +139,6 @@ func ResetNow(db *gorm.DB) error {
 	cs := clientSvc
 	is := inboundSvc
 	mu.Unlock()
-	if cs == nil {
-		return nil
-	}
 
 	// Zero the panel's per-inbound cumulative counters (what the "Xray 代理流量"
 	// dashboard card sums). The per-client client_traffics rows and Xray's
