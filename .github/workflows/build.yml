@@ -72,6 +72,7 @@ jobs:
           cp scripts/inject_saeson_routes.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_xray_versions.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           cp scripts/inject_bulk_adjust.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
+          cp scripts/inject_client_inbound_apply.py /tmp/saeson-mod/scripts/ 2>/dev/null || true
           # Save our custom x-ui.sh (with Clash Link info in option 4)
           cp x-ui.sh /tmp/saeson-mod/ 2>/dev/null || true
 
