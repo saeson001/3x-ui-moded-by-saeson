@@ -59,8 +59,6 @@ export default function SaesonTrafficCalibrateModal({
   const [xrayDown, setXrayDown] = useState<Field>({ value: 0, unit: 1024 ** 3 });
   const [touchXray, setTouchXray] = useState(false);
 
-  const [touchXray, setTouchXray] = useState(false);
-
   // 每次打开都按最新统计值预填一次，用户只需把数字改成实际值。
   // 注意：IndexPage 每 2 秒轮询一次统计，current 会持续变化，所以必须用 ref
   // 守卫只预填一次，否则用户正在输入的数字会被后台刷新覆盖掉。
