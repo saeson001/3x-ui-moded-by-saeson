@@ -163,9 +163,25 @@ func ResetNow(db *gorm.DB) error {
 	}
 	netstats.SetBaseline(sent, recv)
 
+	// Persist the baseline with a load-or-create upsert. The previous
+	// implementation did `UPDATE ... WHERE id = 1`, which silently matched ZERO
+	// rows when the saeson_traffic_reset table had no row yet (the row is only
+	// created by saving a reset schedule). The baseline then lived in memory
+	// only, and the next panel restart reloaded no baseline (=> 0), making the
+	// "总数据" card jump back to the raw since-boot NIC totals (last month's
+	// traffic "reappearing").
 	now := time.Now().Unix()
-	return db.Model(&SaesonTrafficReset{}).Where("id = ?", 1).
-		Updates(map[string]any{"last_reset": now, "nic_base_sent": sent, "nic_base_recv": recv}).Error
+	var row SaesonTrafficReset
+	if err := db.First(&row).Error; err != nil {
+		if err != gorm.ErrRecordNotFound {
+			return err
+		}
+		row = SaesonTrafficReset{Enable: true, ResetDay: 1}
+	}
+	row.LastReset = now
+	row.NicBaseSent = sent
+	row.NicBaseRecv = recv
+	return db.Save(&row).Error
 }
 
 // Status returns the current schedule (for the frontend).
