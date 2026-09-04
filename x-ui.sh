@@ -12,6 +12,10 @@ REPO_OWNER="saeson001"
 REPO_NAME="3x-ui-moded-by-saeson"
 REPO_RAW="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 
+# 本魔改版本号：仓库里是占位符 __SAESON_MOD_VERSION__，CI 构建时由 build.yml 替换为 VERSION 文件内容
+# （fork 的 go build 未注入 mod 版本，x-ui -v 恒显示上游基底 3.4.2，故面板版本号以本变量为准）
+MOD_VERSION="__SAESON_MOD_VERSION__"
+
 #Add some basic function here
 function LOGD() {
     echo -e "${yellow}[DEG] $* ${plain}"
@@ -1065,9 +1069,10 @@ show_version() {
     echo -e "${blue}==================== 版本信息 ====================${plain}"
     echo ""
 
-    # 面板版本（编译时 ldflags 注入二进制，x-ui -v 读取）
-    local current_version=""
-    if [[ -x "${xui_folder}/x-ui" ]]; then
+    # 面板版本：优先用注入的 mod 版本（build.yml 把 __SAESON_MOD_VERSION__ 替换为 VERSION），
+    # 回退到二进制内置 X_UI_CUR_VER（fork 未注入，恒为上游基底 3.4.2，仅兜底）
+    local current_version="${MOD_VERSION:-}"
+    if [[ -z "${current_version}" && -x "${xui_folder}/x-ui" ]]; then
         current_version=$(${xui_folder}/x-ui -v 2>/dev/null | head -n1 | tr -d '[:space:]')
     fi
     echo -e "  面板当前版本: ${green}${current_version:-未知}${plain}"

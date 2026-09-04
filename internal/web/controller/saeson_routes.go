@@ -339,4 +339,44 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "已立即重置全部流量计数", "obj": nil})
 	})
+
+	// --- Traffic calibration: rewrite the currently displayed cumulative
+	//     counters (upper/lower independently) without touching real traffic.
+	//     The NIC counter is corrected via a baseline offset; the Xray card is
+	//     rescaled proportionally when xrayUp / xrayDown are provided. ---
+	trg.POST("/calibrate", func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		req := struct {
+			Sent     uint64  `json:"sent"`
+			Recv     uint64  `json:"recv"`
+			XrayUp   *uint64 `json:"xrayUp"`
+			XrayDown *uint64 `json:"xrayDown"`
+		}{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			// Fall back to form-urlencoded (global axios default is form-encoded).
+			if vals, e2 := url.ParseQuery(string(body)); e2 == nil {
+				req.Sent, _ = strconv.ParseUint(vals.Get("sent"), 10, 64)
+				req.Recv, _ = strconv.ParseUint(vals.Get("recv"), 10, 64)
+				if v := vals.Get("xrayUp"); v != "" {
+					if n, e3 := strconv.ParseUint(v, 10, 64); e3 == nil {
+						req.XrayUp = &n
+					}
+				}
+				if v := vals.Get("xrayDown"); v != "" {
+					if n, e3 := strconv.ParseUint(v, 10, 64); e3 == nil {
+						req.XrayDown = &n
+					}
+				}
+			}
+		}
+		if err := trafficreset.Calibrate(db, req.Sent, req.Recv, req.XrayUp, req.XrayDown); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"msg":     "已校准流量计数，将从新数值继续累计",
+			"obj":     gin.H{"sent": req.Sent, "recv": req.Recv},
+		})
+	})
 }

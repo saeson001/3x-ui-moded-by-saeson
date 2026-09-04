@@ -53,6 +53,7 @@ import SaesonTrafficCard from './SaesonTrafficCard';
 import SaesonFirewallCard from './SaesonFirewallCard';
 import SaesonTrafficHistoryCard from './SaesonTrafficHistoryCard';
 const SaesonTrafficResetModal = lazy(() => import('./SaesonTrafficResetModal'));
+const SaesonTrafficCalibrateModal = lazy(() => import('./SaesonTrafficCalibrateModal'));
 import type { PanelUpdateInfo } from './PanelUpdateModal';
 const JsonEditor = lazy(() => import('@/components/form/JsonEditor'));
 const PanelUpdateModal = lazy(() => import('./PanelUpdateModal'));
@@ -97,6 +98,11 @@ export default function IndexPage() {
   const [versionOpen, setVersionOpen] = useState(false);
   const [trafficResetOpen, setTrafficResetOpen] = useState(false);
   const [netTotals, setNetTotals] = useState<{ sent: number; recv: number }>({ sent: 0, recv: 0 });
+  const [xrayTotals, setXrayTotals] = useState<{ upTotal: number; downTotal: number }>({
+    upTotal: 0,
+    downTotal: 0,
+  });
+  const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [configTextOpen, setConfigTextOpen] = useState(false);
   const [configText, setConfigText] = useState('');
@@ -115,14 +121,27 @@ export default function IndexPage() {
   }, []);
 
   // saeson: poll baselined NIC totals for the "总数据" card so a traffic reset
-  // (which snapshots a NIC baseline) visibly restarts it from zero.
+  // (which snapshots a NIC baseline) visibly restarts it from zero. The Xray
+  // cumulative totals are polled here too, to prefill the calibration modal.
   useEffect(() => {
     let alive = true;
     const load = () => {
-      HttpUtil.get<{ success?: boolean; obj?: { net?: { sent: number; recv: number } } }>('/panel/api/netstats')
+      HttpUtil.get<{
+        success?: boolean;
+        obj?: {
+          net?: { sent: number; recv: number };
+          xray?: { upTotal: number; downTotal: number };
+        };
+      }>('/panel/api/netstats')
         .then((msg) => {
           if (alive && msg?.success && msg.obj?.net) {
             setNetTotals({ sent: msg.obj.net.sent, recv: msg.obj.net.recv });
+          }
+          if (alive && msg?.success && msg.obj?.xray) {
+            setXrayTotals({
+              upTotal: msg.obj.xray.upTotal || 0,
+              downTotal: msg.obj.xray.downTotal || 0,
+            });
           }
         })
         .catch(() => {});
@@ -377,6 +396,9 @@ export default function IndexPage() {
                       hoverable
                       extra={
                         <Space size={4}>
+                          <Button size="small" onClick={() => setCalibrateOpen(true)}>
+                            校准
+                          </Button>
                           <Button size="small" loading={resetting} onClick={resetAllTraffic}>
                             重置计数
                           </Button>
@@ -616,6 +638,19 @@ export default function IndexPage() {
 
         <LazyMount when={trafficResetOpen}>
           <SaesonTrafficResetModal open={trafficResetOpen} onOpenChange={setTrafficResetOpen} />
+        </LazyMount>
+
+        <LazyMount when={calibrateOpen}>
+          <SaesonTrafficCalibrateModal
+            open={calibrateOpen}
+            onOpenChange={setCalibrateOpen}
+            current={{
+              sent: netTotals.sent,
+              recv: netTotals.recv,
+              upTotal: xrayTotals.upTotal,
+              downTotal: xrayTotals.downTotal,
+            }}
+          />
         </LazyMount>
       </Layout>
     </ConfigProvider>

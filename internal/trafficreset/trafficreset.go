@@ -184,6 +184,98 @@ func ResetNow(db *gorm.DB) error {
 	return db.Save(&row).Error
 }
 
+// Calibrate rewrites the CURRENTLY DISPLAYED cumulative counters without
+// touching any real counter. The kernel NIC counters cannot be rewritten, so
+// the "总数据" card is corrected by moving the baseline:
+//
+//	displayed = raw - baseline   =>   newBaseline = raw - target
+//
+// After calibration the card keeps counting up from the corrected value, which
+// is what operators need when the panel's number drifts away from the VPS
+// provider's billing figure (e.g. panel says 200G, provider says 30G).
+//
+// Both directions (sent/recv) are handled independently.
+//
+// The "Xray 代理流量" card sums the inbounds up/down columns, which ARE regular
+// DB counters. When xrayUp / xrayDown are non-nil they are applied by scaling
+// every inbound proportionally, so the new total matches the target exactly
+// while the relative distribution between inbounds is preserved. Passing nil
+// leaves the Xray counters untouched.
+func Calibrate(db *gorm.DB, targetSent, targetRecv uint64, xrayUp, xrayDown *uint64) error {
+	sent, recv, err := netstats.RawNIC()
+	if err != nil {
+		return err
+	}
+
+	baseSent := clampSub(sent, targetSent)
+	baseRecv := clampSub(recv, targetRecv)
+	netstats.SetBaseline(baseSent, baseRecv)
+
+	if xrayUp != nil || xrayDown != nil {
+		if err := scaleInbounds(db, xrayUp, xrayDown); err != nil {
+			return err
+		}
+	}
+
+	// Persist with a load-or-create upsert (same pattern as ResetNow): a bare
+	// UPDATE ... WHERE id = 1 silently matches 0 rows when the row does not
+	// exist yet, which used to make the correction vanish on restart.
+	var row SaesonTrafficReset
+	if err := db.First(&row).Error; err != nil {
+		if err != gorm.ErrRecordNotFound {
+			return err
+		}
+		row = SaesonTrafficReset{Enable: true, ResetDay: 1}
+	}
+	row.NicBaseSent = baseSent
+	row.NicBaseRecv = baseRecv
+	return db.Save(&row).Error
+}
+
+// clampSub subtracts b from a and floors the result at zero, guarding against
+// an underflow when the requested target exceeds the raw kernel counter (the
+// baseline then simply ends up at 0).
+func clampSub(a, b uint64) uint64 {
+	if a > b {
+		return a - b
+	}
+	return 0
+}
+
+// scaleInbounds rescales every inbound's up/down columns so their SUMS match
+// the requested targets. Inbounds that are already zero stay zero; when the
+// current total is zero the target is assigned to nothing (nothing to scale).
+func scaleInbounds(db *gorm.DB, targetUp, targetDown *uint64) error {
+	var t struct {
+		Up   *int64
+		Down *int64
+	}
+	if err := db.Raw("SELECT COALESCE(SUM(up),0) AS up, COALESCE(SUM(down),0) AS down FROM inbounds").Scan(&t).Error; err != nil {
+		return err
+	}
+	var curUp, curDown int64
+	if t.Up != nil {
+		curUp = *t.Up
+	}
+	if t.Down != nil {
+		curDown = *t.Down
+	}
+
+	if targetUp != nil && curUp > 0 {
+		if err := db.Exec("UPDATE inbounds SET up = CAST(up * ? AS INTEGER)",
+			float64(*targetUp)/float64(curUp)).Error; err != nil {
+			return err
+		}
+	}
+	if targetDown != nil && curDown > 0 {
+		if err := db.Exec("UPDATE inbounds SET down = CAST(down * ? AS INTEGER)",
+			float64(*targetDown)/float64(curDown)).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Status returns the current schedule (for the frontend).
 func Status(db *gorm.DB) (*SaesonTrafficReset, error) {
 	var row SaesonTrafficReset

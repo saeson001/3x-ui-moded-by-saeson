@@ -117,6 +117,8 @@ jobs:
             # saeson v1.4.8: batch-set inbound association modal + global traffic-reset schedule modal
             cp -f frontend-patches/pages/clients/BulkSetInboundsModal.tsx frontend/src/pages/clients/BulkSetInboundsModal.tsx
             cp -f frontend-patches/pages/index/SaesonTrafficResetModal.tsx frontend/src/pages/index/SaesonTrafficResetModal.tsx
+            # saeson v1.5.3: traffic calibration modal (rewrite displayed cumulative counters)
+            cp -f frontend-patches/pages/index/SaesonTrafficCalibrateModal.tsx frontend/src/pages/index/SaesonTrafficCalibrateModal.tsx
             # saeson v1.3.4: inbound list column widths + centered headers
             cp -f frontend-patches/pages/inbounds/list/useInboundColumns.tsx frontend/src/pages/inbounds/list/useInboundColumns.tsx
             # saeson v1.3.7: sidebar version badge -> fork repo + mod version;
