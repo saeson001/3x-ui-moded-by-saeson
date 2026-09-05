@@ -167,18 +167,65 @@ func detectSSHPorts() []int {
 	return sortedKeys(ports)
 }
 
+// Panel setting defaults, mirroring defaultValueMap in
+// internal/web/service/setting.go.
+//
+// The panel's SettingService.getString() falls back to these values whenever a
+// key is absent from the settings table. The firewall must apply the exact same
+// fallback, otherwise the two disagree: e.g. when "subPort" was never saved, the
+// subscription server still listens on 2096 (default) while the firewall skips
+// it entirely, so every external /sub/ and /clash/ request silently times out
+// even though the panel UI looks correctly configured.
+const (
+	defaultWebPort = 2053
+	defaultSubPort = 2096
+)
+
+// settingValue reads a setting from the DB, falling back to def when the key is
+// absent, empty or unreadable (same semantics as SettingService.getString).
+func settingValue(db *gorm.DB, key, def string) string {
+	var value string
+	if err := db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&value).Error; err != nil {
+		return def
+	}
+	if strings.TrimSpace(value) == "" {
+		return def
+	}
+	return strings.TrimSpace(value)
+}
+
+// settingBool reads a boolean setting with a default fallback.
+func settingBool(db *gorm.DB, key string, def bool) bool {
+	b, err := strconv.ParseBool(settingValue(db, key, strconv.FormatBool(def)))
+	if err != nil {
+		return def
+	}
+	return b
+}
+
 // panelPorts reads webPort/subPort from the settings table.
+//
+// subPort is only returned when the subscription service is actually enabled,
+// and falls back to the panel default (2096) when the key was never persisted.
+// Note: subListen is an IP address, not a port, so it is deliberately not
+// collected here (parsing it as a port never succeeded anyway).
 func panelPorts(db *gorm.DB) []int {
 	ports := map[int]bool{}
-	for _, key := range []string{"webPort", "subPort", "subListen"} {
-		var value string
-		if err := db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&value).Error; err != nil || value == "" {
-			continue
-		}
+
+	addPort := func(value string) {
 		if p, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && p > 0 && p < 65536 {
 			ports[p] = true
 		}
 	}
+
+	addPort(settingValue(db, "webPort", strconv.Itoa(defaultWebPort)))
+
+	// The subscription server only binds its port when subEnable is on, so
+	// there is nothing to allow when the service is disabled.
+	if settingBool(db, "subEnable", true) {
+		addPort(settingValue(db, "subPort", strconv.Itoa(defaultSubPort)))
+	}
+
 	return sortedKeys(ports)
 }
 

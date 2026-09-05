@@ -129,6 +129,9 @@ jobs:
             # panel update modal warning (official updater would overwrite the fork)
             cp -f frontend-patches/layouts/AppSidebar.tsx frontend/src/layouts/AppSidebar.tsx
             cp -f frontend-patches/pages/index/PanelUpdateModal.tsx frontend/src/pages/index/PanelUpdateModal.tsx
+            # saeson v1.6.3: 订阅服务与 Clash/Mihomo 开关联动 + 保存后自动同步防火墙放行 2096
+            cp -f frontend-patches/pages/settings/SubscriptionGeneralTab.tsx frontend/src/pages/settings/SubscriptionGeneralTab.tsx
+            cp -f frontend-patches/pages/settings/SettingsPage.tsx frontend/src/pages/settings/SettingsPage.tsx
             # saeson v1.3.7: inject mod version (from VERSION file) into patched files
             MOD_VER="$(cat VERSION)"
             # saeson: report the mod version as the panel's own version so the WebUI
