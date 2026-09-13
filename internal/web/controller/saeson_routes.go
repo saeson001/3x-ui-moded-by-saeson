@@ -5,16 +5,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mhsanaei/3x-ui/v3/internal/clientreset"
+	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/firewall"
 	"github.com/mhsanaei/3x-ui/v3/internal/inboundassoc"
 	"github.com/mhsanaei/3x-ui/v3/internal/netstats"
 	"github.com/mhsanaei/3x-ui/v3/internal/trafficlog"
 	"github.com/mhsanaei/3x-ui/v3/internal/trafficreset"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 	"gorm.io/gorm"
 )
@@ -377,6 +381,443 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 			"success": true,
 			"msg":     "已校准流量计数，将从新数值继续累计",
 			"obj":     gin.H{"sent": req.Sent, "recv": req.Recv},
+		})
+	})
+
+	// ---- Client sync: export / import / sorted-by-email ----
+	// Enables cross-VPS client migration and consistent client ordering
+	// across multiple 3x-ui instances (sort by email, not by DB id).
+	//
+	// Field names follow the upstream v3.4.2 model exactly: model.ClientRecord
+	// carries Id/Email/UUID/Flow/Enable/SubID/ExpiryTime/TotalGB directly
+	// (no "Total" — the column is TotalGB). model.Inbound's human-readable
+	// label is Remark, NOT Name — there is no Name field on Inbound.
+	// ClientRecord.ToClient() maps UUID → Client.ID, so both spellings compile;
+	// we read the record fields directly to avoid a needless allocation.
+
+	// clientInboundNames loads every client's inbound name list (email → []name).
+	// Shared by /clients/export and /clients/sorted.
+	loadClientInboundNames := func(db *gorm.DB) map[string][]string {
+		names := map[string][]string{}
+		var mappings []model.ClientInbound
+		if err := db.Find(&mappings).Error; err != nil {
+			return names
+		}
+		var inbounds []model.Inbound
+		if err := db.Find(&inbounds).Error; err != nil {
+			return names
+		}
+		ibNameByID := make(map[int]string, len(inbounds))
+		for _, ib := range inbounds {
+			ibNameByID[ib.Id] = ib.Remark
+		}
+		var records []model.ClientRecord
+		if err := db.Select("id", "email").Find(&records).Error; err != nil {
+			return names
+		}
+		idByEmail := make(map[int]string, len(records))
+		for _, r := range records {
+			idByEmail[r.Id] = r.Email
+		}
+		for _, m := range mappings {
+			email, ok := idByEmail[m.ClientId]
+			if !ok {
+				continue
+			}
+			if name, ok := ibNameByID[m.InboundId]; ok {
+				names[email] = append(names[email], name)
+			}
+		}
+		// Emit [] rather than null for clients with no matching inbound.
+		for _, r := range records {
+			if names[r.Email] == nil {
+				names[r.Email] = []string{}
+			}
+		}
+		return names
+	}
+
+	// clientSyncEntry is the wire shape shared by /clients/export,
+	// /clients/import and /clients/diff. Export emits "id"; import/diff accept
+	// either "id" or "uuid" so a hand-trimmed file still works.
+	type clientSyncEntry struct {
+		Email        string   `json:"email"`
+		ID           string   `json:"id"`
+		UUID         string   `json:"uuid"`
+		Flow         string   `json:"flow"`
+		Total        int64    `json:"total"`
+		ExpiryTime   int64    `json:"expiryTime"`
+		Enable       bool     `json:"enable"`
+		InboundNames []string `json:"inboundNames"`
+	}
+
+	// clientSyncID returns the UUID carried by an entry, tolerating either key.
+	clientSyncID := func(e clientSyncEntry) string {
+		if e.ID != "" {
+			return e.ID
+		}
+		return e.UUID
+	}
+
+	// unmarshalClientSyncList accepts either {clients:[...]} (this export
+	// format) or a bare [...] so a hand-trimmed file still works.
+	unmarshalClientSyncList := func(body []byte) ([]clientSyncEntry, error) {
+		wrapped := struct {
+			Clients []clientSyncEntry `json:"clients"`
+		}{}
+		if err := json.Unmarshal(body, &wrapped); err == nil {
+			return wrapped.Clients, nil
+		}
+		var bare []clientSyncEntry
+		if err := json.Unmarshal(body, &bare); err != nil {
+			return nil, err
+		}
+		return bare, nil
+	}
+
+	// GET /clients/export — export all clients sorted by email, with the
+	// inbound names each one is attached to. The resulting JSON can be
+	// imported into another 3x-ui instance via POST /clients/import.
+	g.GET("/clients/export", func(c *gin.Context) {
+		var records []model.ClientRecord
+		if err := db.Order("email ASC").Find(&records).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		namesByEmail := loadClientInboundNames(db)
+
+		type ExportClient struct {
+			Email        string   `json:"email"`
+			ID           string   `json:"id,omitempty"`
+			Flow         string   `json:"flow,omitempty"`
+			Total        int64    `json:"total"`
+			ExpiryTime   int64    `json:"expiryTime"`
+			Enable       bool     `json:"enable"`
+			InboundNames []string `json:"inboundNames"`
+		}
+		clients := make([]ExportClient, 0, len(records))
+		for i := range records {
+			r := &records[i]
+			clients = append(clients, ExportClient{
+				Email:        r.Email,
+				ID:           r.UUID,
+				Flow:         r.Flow,
+				Total:        r.TotalGB,
+				ExpiryTime:   r.ExpiryTime,
+				Enable:       r.Enable,
+				InboundNames: namesByEmail[r.Email],
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"msg":     "",
+			"obj": gin.H{
+				"version":     1,
+				"exportedAt":  time.Now().Unix(),
+				"clientCount": len(clients),
+				"clients":     clients,
+			},
+		})
+	})
+
+	// POST /clients/import — import clients from an exported JSON.
+	// Existing clients (matched by email) are skipped; new ones are created
+	// via the upstream BulkCreate and attached to inbounds matched by name.
+	// Accepts both {clients:[...]} (this export format) and a bare [...] so a
+	// hand-trimmed file still works.
+	g.POST("/clients/import", func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		raw, err := unmarshalClientSyncList(body)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "invalid JSON: " + err.Error(), "obj": nil})
+			return
+		}
+
+		// Remark → id for inbounds on this instance. Inbound has no Name field.
+		var inbounds []model.Inbound
+		db.Find(&inbounds)
+		ibIDByName := make(map[string]int, len(inbounds))
+		for _, ib := range inbounds {
+			ibIDByName[ib.Remark] = ib.Id
+		}
+
+		// Existing emails in one query (not one round-trip per client).
+		emailList := make([]string, 0, len(raw))
+		for _, cli := range raw {
+			if e := strings.TrimSpace(cli.Email); e != "" {
+				emailList = append(emailList, e)
+			}
+		}
+		exists := make(map[string]bool, len(emailList))
+		if len(emailList) > 0 {
+			var existing []model.ClientRecord
+			db.Where("email IN ?", emailList).Pluck("email", &existing)
+			for _, e := range existing {
+				exists[e.Email] = true
+			}
+		}
+
+		// Build payloads for BulkCreate, skipping existing clients and those
+		// whose inbound names don't resolve on this instance (a client needs
+		// at least one inbound or BulkCreate refuses it).
+		var payloads []service.ClientCreatePayload
+		var skipped, noInbound, existingSkipped int
+		for _, cli := range raw {
+			email := strings.TrimSpace(cli.Email)
+			if email == "" {
+				skipped++
+				continue
+			}
+			if exists[email] {
+				skipped++
+				existingSkipped++
+				continue
+			}
+			var ibIDs []int
+			for _, name := range cli.InboundNames {
+				if id, ok := ibIDByName[name]; ok {
+					ibIDs = append(ibIDs, id)
+				}
+			}
+			if len(ibIDs) == 0 {
+				skipped++
+				noInbound++
+				continue
+			}
+			payloads = append(payloads, service.ClientCreatePayload{
+				Client: model.Client{
+					// Empty UUID → BulkCreate/fillProtocolDefaults generates one.
+					Email:      email,
+					ID:         clientSyncID(cli),
+					Flow:       cli.Flow,
+					TotalGB:    cli.Total,
+					ExpiryTime: cli.ExpiryTime,
+					Enable:     true, // BulkCreate forces Enable=true anyway
+				},
+				InboundIds: ibIDs,
+			})
+		}
+
+		var created int
+		if len(payloads) > 0 {
+			result, _, err := api.inboundController.clientService.BulkCreate(
+				&api.inboundController.inboundService, payloads)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{"success": false, "msg": "bulk create failed: " + err.Error(), "obj": nil})
+				return
+			}
+			created = result.Created
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"msg":     "导入完成",
+			"obj": gin.H{
+				"created":   created,
+				"skipped":   skipped,
+				"existing":  existingSkipped,
+				"noInbound": noInbound,
+			},
+		})
+	})
+
+	// GET /client-sync — standalone client-sync UI page.
+	g.GET("/client-sync", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(clientSyncHTML))
+	})
+
+	// GET /clients/sorted — every client sorted by email, with inbound names.
+	// Lets two instances be compared side by side in the same order.
+	g.GET("/clients/sorted", func(c *gin.Context) {
+		var records []model.ClientRecord
+		if err := db.Order("email ASC").Find(&records).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		namesByEmail := loadClientInboundNames(db)
+
+		type SortedClient struct {
+			Email        string   `json:"email"`
+			ID           int      `json:"id"`
+			UUID         string   `json:"uuid"`
+			Enable       bool     `json:"enable"`
+			InboundNames []string `json:"inboundNames"`
+		}
+		clients := make([]SortedClient, 0, len(records))
+		for i := range records {
+			r := &records[i]
+			clients = append(clients, SortedClient{
+				Email:        r.Email,
+				ID:           r.Id,
+				UUID:         r.UUID,
+				Enable:       r.Enable,
+				InboundNames: namesByEmail[r.Email],
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "", "obj": clients})
+	})
+
+	// POST /clients/diff — compare this instance against another instance's
+	// export JSON (same shape as /clients/export, or a bare array). Returns the
+	// three-way split so two panels can be reconciled without deleting anything:
+	//   onlyLocal  clients here that the other side lacks
+	//   onlyRemote clients on the other side that can be imported here
+	//   both       present on both, with uuidMatch flagging identity drift
+	// uuidMatch=false means the same email is a DIFFERENT credential on the two
+	// sides (import would skip it as existing), so the client's actual link
+	// differs — worth surfacing before anyone "fixes" it blindly.
+	g.POST("/clients/diff", func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		raw, err := unmarshalClientSyncList(body)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": "invalid JSON: " + err.Error(), "obj": nil})
+			return
+		}
+
+		// Order local records by id ASC — this is the panel's default listing
+		// order (client_link.go:186 hardcodes ORDER BY clients.id ASC). The
+		// user's "对齐" requirement means "left side order wins"; using email
+		// order here would silently reorder the base side.
+		var records []model.ClientRecord
+		if err := db.Order("id ASC").Find(&records).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
+			return
+		}
+		namesByEmail := loadClientInboundNames(db)
+
+		local := make(map[string]*model.ClientRecord, len(records))
+		for i := range records {
+			local[records[i].Email] = &records[i]
+		}
+
+		// Remark → id for inbounds on this instance.
+		var inbounds []model.Inbound
+		db.Find(&inbounds)
+		ibKnown := make(map[string]bool, len(inbounds))
+		for _, ib := range inbounds {
+			ibKnown[ib.Remark] = true
+		}
+
+		type diffOnly struct {
+			Email        string   `json:"email"`
+			UUID         string   `json:"uuid"`
+			Enable       bool     `json:"enable"`
+			InboundNames []string `json:"inboundNames"`
+		}
+		type diffBoth struct {
+			Email               string   `json:"email"`
+			LocalUUID           string   `json:"localUuid"`
+			RemoteUUID          string   `json:"remoteUuid"`
+			UUIDMatch           bool     `json:"uuidMatch"`
+			LocalEnable         bool     `json:"localEnable"`
+			RemoteEnable        bool     `json:"remoteEnable"`
+			EnableMatch         bool     `json:"enableMatch"`
+			InboundNamesLocal   []string `json:"inboundNamesLocal"`
+			InboundNamesRemote  []string `json:"inboundNamesRemote"`
+			MissingInboundNames []string `json:"missingInboundNames"`
+		}
+
+		onlyLocal := []diffOnly{}
+		onlyRemote := []diffOnly{}
+		both := []diffBoth{}
+		missingByName := map[string]bool{}
+
+		// Pass 1: walk the remote export (preserving its own panel order) and
+		// bucket entries into remoteByEmail (matched) or onlyRemote (unmatched).
+		remoteByEmail := make(map[string]clientSyncEntry, len(raw))
+		for _, cli := range raw {
+			email := strings.TrimSpace(cli.Email)
+			if email == "" {
+				continue
+			}
+			remoteByEmail[email] = cli
+			for _, name := range cli.InboundNames {
+				if !ibKnown[name] {
+					missingByName[name] = true
+				}
+			}
+		}
+
+		// Pass 2: walk local records in DB order. For each one either append
+		// to `both` (if the remote side has the same email) or to `onlyLocal`.
+		// This is what gives the "left side order wins" property the user asked
+		// for — both[] and onlyLocal[] both inherit the local panel ordering.
+		seenLocal := map[string]bool{}
+		for i := range records {
+			r := &records[i]
+			cli, ok := remoteByEmail[r.Email]
+			seenLocal[r.Email] = true
+			if !ok {
+				onlyLocal = append(onlyLocal, diffOnly{
+					Email:        r.Email,
+					UUID:         r.UUID,
+					Enable:       r.Enable,
+					InboundNames: namesByEmail[r.Email],
+				})
+				continue
+			}
+			remoteUUID := clientSyncID(cli)
+			var missing []string
+			for _, name := range cli.InboundNames {
+				if !ibKnown[name] {
+					missing = append(missing, name)
+				}
+			}
+			both = append(both, diffBoth{
+				Email:               r.Email,
+				LocalUUID:           r.UUID,
+				RemoteUUID:          remoteUUID,
+				UUIDMatch:           r.UUID == remoteUUID,
+				LocalEnable:         r.Enable,
+				RemoteEnable:        cli.Enable,
+				EnableMatch:         r.Enable == cli.Enable,
+				InboundNamesLocal:   namesByEmail[r.Email],
+				InboundNamesRemote:  cli.InboundNames,
+				MissingInboundNames: missing,
+			})
+		}
+
+		// Pass 3: any remote entry not seen on the local side goes to onlyRemote,
+		// in the remote panel's original order (the order the file was exported in).
+		for _, cli := range raw {
+			email := strings.TrimSpace(cli.Email)
+			if email == "" || seenLocal[email] {
+				continue
+			}
+			onlyRemote = append(onlyRemote, diffOnly{
+				Email:        email,
+				UUID:         clientSyncID(cli),
+				Enable:       cli.Enable,
+				InboundNames: cli.InboundNames,
+			})
+		}
+
+		missing := []string{}
+		for name := range missingByName {
+			missing = append(missing, name)
+		}
+		sort.Strings(missing)
+
+		uuidMismatches := 0
+		for _, b := range both {
+			if !b.UUIDMatch {
+				uuidMismatches++
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"msg":     "",
+			"obj": gin.H{
+				"onlyLocal":           onlyLocal,
+				"onlyRemote":          onlyRemote,
+				"both":                both,
+				"missingInboundNames": missing,
+				"uuidMismatches":      uuidMismatches,
+				"localCount":          len(records),
+				"remoteCount":         len(raw),
+			},
 		})
 	})
 }
