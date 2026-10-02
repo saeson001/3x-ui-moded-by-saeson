@@ -1,9 +1,9 @@
 package controller
 
 // clientSyncHTML is the standalone client-sync UI page. It is registered on the
-// /api router group, so it is served at /api/client-sync (auth required, same as
-// the rest of the panel API). It calls /api/clients/export, /api/clients/import,
-// /api/clients/diff and /api/clients/sorted to provide cross-VPS client
+// /panel/api router group, so it is served at /panel/api/client-sync (auth required, same as
+// the rest of the panel API). It calls /panel/api/client-sync/export, /panel/api/client-sync/import,
+// /panel/api/client-sync/diff and /panel/api/client-sync/sorted to provide cross-VPS client
 // migration, and a three-way diff view so two instances that already both have
 // clients can be aligned by email and reconciled without touching DB primary
 // keys.
@@ -12,6 +12,7 @@ const clientSyncHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="__SAESON_CSRF_TOKEN__">
 <title>客户端同步 — 3x-ui</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -112,14 +113,15 @@ code{background:#f3f4f6;padding:1px 6px;border-radius:4px;font-size:12px}
 <li>反向操作同理：在 VPS-B 上传 VPS-A 的导出，即可把 A 多的用户同步到 B</li>
 </ol>
 <p class="tip" style="margin-top:8px">注意：面板自带的客户端列表按<b>入库顺序</b>（自增 ID）显示，无法按邮箱重排。本工具的对齐是在<b>对比视图</b>里做的，不改动数据库主键，不会破坏流量统计与关联关系。</p>
-<p class="tip" style="margin-top:4px">API：<code>GET /api/clients/export</code> · <code>POST /api/clients/import</code> · <code>POST /api/clients/diff</code> · <code>GET /api/clients/sorted</code></p>
+<p class="tip" style="margin-top:4px">API：<code>GET /panel/api/client-sync/export</code> · <code>POST /panel/api/client-sync/import</code> · <code>POST /panel/api/client-sync/diff</code> · <code>GET /panel/api/client-sync/sorted</code></p>
 </div>
 
 <script>
+const SAESON_CSRF = document.querySelector('meta[name="csrf-token"]').content;
 async function api(path, opts) {
   const res = await fetch(path, {
     ...opts,
-    headers: opts && opts.headers ? opts.headers : {'Content-Type':'application/json'}
+    headers: {'Content-Type':'application/json','X-CSRF-Token':SAESON_CSRF, ...(opts && opts.headers ? opts.headers : {})}
   });
   return res.json();
 }
@@ -130,7 +132,7 @@ async function doExport() {
   el.textContent = '正在导出...';
   res.innerHTML = '';
   try {
-    const d = await api('/api/clients/export');
+    const d = await api('/panel/api/client-sync/export');
     if (!d.success) {
       el.textContent = '';
       res.innerHTML = '<div class="msg msg-err">' + (d.msg||'导出失败') + '</div>';
@@ -161,7 +163,7 @@ async function doImport() {
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-    const d = await api('/api/clients/import', {method:'POST', body: JSON.stringify(data)});
+    const d = await api('/panel/api/client-sync/import', {method:'POST', body: JSON.stringify(data)});
     if (!d.success) {
       res.innerHTML = '<div class="msg msg-err">' + (d.msg||'导入失败') + '</div>';
       return;
@@ -181,7 +183,7 @@ async function loadSorted() {
   el.textContent = '加载中...';
   res.innerHTML = '';
   try {
-    const d = await api('/api/clients/sorted');
+    const d = await api('/panel/api/client-sync/sorted');
     if (!d.success) {
       el.textContent = '';
       res.innerHTML = '<div class="msg msg-err">' + (d.msg||'获取失败') + '</div>';
@@ -227,7 +229,7 @@ async function doDiff() {
   } catch(e) { res.innerHTML = '<div class="msg msg-err">JSON 解析失败: ' + e.message + '</div>'; return; }
   res.innerHTML = '<div class="msg msg-info">正在对比...</div>';
   try {
-    const d = await api('/api/clients/diff', {method:'POST', body: JSON.stringify(data)});
+    const d = await api('/panel/api/client-sync/diff', {method:'POST', body: JSON.stringify(data)});
     if (!d.success) { res.innerHTML = '<div class="msg msg-err">' + (d.msg||'对比失败') + '</div>'; return; }
     renderDiff(d.obj);
   } catch(e) { res.innerHTML = '<div class="msg msg-err">网络错误: ' + e.message + '</div>'; }
@@ -376,7 +378,7 @@ async function importOnlyRemote() {
   };
   st.textContent = '导入中...';
   try {
-    const d = await api('/api/clients/import', {method:'POST', body: JSON.stringify(payload)});
+    const d = await api('/panel/api/client-sync/import', {method:'POST', body: JSON.stringify(payload)});
     if (!d.success) { st.textContent = ''; return; }
     st.textContent = '已导入 ' + (d.obj.created||0) + ' 个，跳过 ' + (d.obj.skipped||0) + ' 个'
       + (d.obj.noInbound ? '（其中 ' + d.obj.noInbound + ' 个因本机无同名入站）' : '');
