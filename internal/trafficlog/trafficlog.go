@@ -249,7 +249,9 @@ func GetTargets(db *gorm.DB) (*Targets, error) {
 	if err := db.Table("inbounds").Select("id, remark, settings").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	t := &Targets{}
+	// 空库时也必须返回空切片而不是 nil：nil 会被序列化成 null，
+	// 前端 IndexPage 对 targets.inbounds/clients 直接 .map() 会崩。
+	t := &Targets{Inbounds: []InboundTarget{}, Clients: []ClientTarget{}}
 	seen := map[string]bool{}
 	for _, r := range rows {
 		t.Inbounds = append(t.Inbounds, InboundTarget{Id: r.Id, Remark: r.Remark})
