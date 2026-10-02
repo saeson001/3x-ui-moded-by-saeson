@@ -41,8 +41,9 @@ jobs:
     steps:
       - name: Install container build dependencies
         run: |
-          apt-get update -qq
-          apt-get install -y -q git curl wget tar ca-certificates unzip python3 \
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y git curl wget tar ca-certificates unzip python3 \
             gcc libc6-dev libsqlite3-dev pkg-config
           git config --global --add safe.directory '*' || true
           echo "Container glibc: $(ldd --version | head -1)"
