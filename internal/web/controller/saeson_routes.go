@@ -396,7 +396,7 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 	// we read the record fields directly to avoid a needless allocation.
 
 	// clientInboundNames loads every client's inbound name list (email → []name).
-	// Shared by /clients/export and /clients/sorted.
+	// Shared by /client-sync/export and /client-sync/sorted.
 	loadClientInboundNames := func(db *gorm.DB) map[string][]string {
 		names := map[string][]string{}
 		var mappings []model.ClientInbound
@@ -437,8 +437,8 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 		return names
 	}
 
-	// clientSyncEntry is the wire shape shared by /clients/export,
-	// /clients/import and /clients/diff. Export emits "id"; import/diff accept
+	// clientSyncEntry is the wire shape shared by /client-sync/export,
+	// /client-sync/import and /client-sync/diff. Export emits "id"; import/diff accept
 	// either "id" or "uuid" so a hand-trimmed file still works.
 	type clientSyncEntry struct {
 		Email        string   `json:"email"`
@@ -475,10 +475,10 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 		return bare, nil
 	}
 
-	// GET /clients/export — export all clients sorted by email, with the
+	// GET /client-sync/export — export all clients sorted by email, with the
 	// inbound names each one is attached to. The resulting JSON can be
-	// imported into another 3x-ui instance via POST /clients/import.
-	g.GET("/clients/export", func(c *gin.Context) {
+	// imported into another 3x-ui instance via POST /client-sync/import.
+	g.GET("/client-sync/export", func(c *gin.Context) {
 		var records []model.ClientRecord
 		if err := db.Order("email ASC").Find(&records).Error; err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
@@ -521,12 +521,12 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 		})
 	})
 
-	// POST /clients/import — import clients from an exported JSON.
+	// POST /client-sync/import — import clients from an exported JSON.
 	// Existing clients (matched by email) are skipped; new ones are created
 	// via the upstream BulkCreate and attached to inbounds matched by name.
 	// Accepts both {clients:[...]} (this export format) and a bare [...] so a
 	// hand-trimmed file still works.
-	g.POST("/clients/import", func(c *gin.Context) {
+	g.POST("/client-sync/import", func(c *gin.Context) {
 		body, _ := io.ReadAll(c.Request.Body)
 		raw, err := unmarshalClientSyncList(body)
 		if err != nil {
@@ -624,12 +624,18 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 
 	// GET /client-sync — standalone client-sync UI page.
 	g.GET("/client-sync", func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(clientSyncHTML))
+		token, err := session.EnsureCSRFToken(c)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "msg": err.Error()})
+			return
+		}
+		html := strings.Replace(clientSyncHTML, "__SAESON_CSRF_TOKEN__", token, 1)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 	})
 
-	// GET /clients/sorted — every client sorted by email, with inbound names.
+	// GET /client-sync/sorted — every client sorted by email, with inbound names.
 	// Lets two instances be compared side by side in the same order.
-	g.GET("/clients/sorted", func(c *gin.Context) {
+	g.GET("/client-sync/sorted", func(c *gin.Context) {
 		var records []model.ClientRecord
 		if err := db.Order("email ASC").Find(&records).Error; err != nil {
 			c.JSON(http.StatusOK, gin.H{"success": false, "msg": err.Error(), "obj": nil})
@@ -658,8 +664,8 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 		c.JSON(http.StatusOK, gin.H{"success": true, "msg": "", "obj": clients})
 	})
 
-	// POST /clients/diff — compare this instance against another instance's
-	// export JSON (same shape as /clients/export, or a bare array). Returns the
+	// POST /client-sync/diff — compare this instance against another instance's
+	// export JSON (same shape as /client-sync/export, or a bare array). Returns the
 	// three-way split so two panels can be reconciled without deleting anything:
 	//   onlyLocal  clients here that the other side lacks
 	//   onlyRemote clients on the other side that can be imported here
@@ -667,7 +673,7 @@ func RegisterSaesonRoutes(apiGroup *gin.RouterGroup, db *gorm.DB, api *APIContro
 	// uuidMatch=false means the same email is a DIFFERENT credential on the two
 	// sides (import would skip it as existing), so the client's actual link
 	// differs — worth surfacing before anyone "fixes" it blindly.
-	g.POST("/clients/diff", func(c *gin.Context) {
+	g.POST("/client-sync/diff", func(c *gin.Context) {
 		body, _ := io.ReadAll(c.Request.Body)
 		raw, err := unmarshalClientSyncList(body)
 		if err != nil {
