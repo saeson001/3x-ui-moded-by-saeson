@@ -19,12 +19,15 @@ jobs:
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
-    # saeson mod: compile inside Debian 11 (bullseye, glibc 2.31) so the produced
-    # binary runs on Debian 11/12 and Ubuntu 20.04+. The default ubuntu-latest
-    # (glibc 2.34+) produces binaries that fail on Debian 11 with
-    # "GLIBC_2.32/2.33/2.34 not found".
+    # saeson mod: build on a glibc 2.31 base so the produced binary runs on
+    # Debian 11/12 and Ubuntu 20.04+. Newer bases (glibc 2.34+) produce
+    # binaries that fail on Debian 11 with "GLIBC_2.32/2.33/2.34 not found".
+    # ubuntu:20.04 ships glibc 2.31 exactly like the old debian:bullseye
+    # image, but keeps its apt suites consistent after the Debian 11 EOL
+    # broke bullseye (security pool purged while the index still lists
+    # those .debs, and the post-EOL image ships newer packages than main).
     container:
-      image: debian:bullseye
+      image: ubuntu:20.04
     strategy:
       fail-fast: false
       matrix:
@@ -38,20 +41,8 @@ jobs:
     steps:
       - name: Install container build dependencies
         run: |
-          # Debian 11 EOL: the bullseye-security pool files were purged, but its
-          # Packages index still lists them, so apt hits 404 on every security
-          # update. bullseye main still serves everything this step needs, so
-          # drop the security source (same fix install.sh applies on EOL'd
-          # Debian 11 VPSes). Keep the bullseye container: the CGO build must
-          # stay linkable on glibc 2.31 for Debian 11 production panels.
-          sed -i 's|^deb.*security|#&|' /etc/apt/sources.list
           apt-get update -qq
-          # The current debian:bullseye image ships post-EOL security versions
-          # (e.g. perl-base deb11u5) while bullseye main only offers older ones,
-          # and perl's strict (=) dependency makes apt refuse the mix. Snap
-          # everything back to main's self-consistent set in this throwaway
-          # container.
-          apt-get install -y -q --allow-downgrades git curl wget tar ca-certificates unzip python3 \
+          apt-get install -y -q git curl wget tar ca-certificates unzip python3 \
             gcc libc6-dev libsqlite3-dev pkg-config
           git config --global --add safe.directory '*' || true
           echo "Container glibc: $(ldd --version | head -1)"
