@@ -390,17 +390,46 @@ configure_panel() {
         fi
     fi
 
-    # 设置面板参数
-    ${xui_folder}/x-ui setting -username "${username}" >/dev/null 2>&1
-    ${xui_folder}/x-ui setting -password "${password}" >/dev/null 2>&1
-    ${xui_folder}/x-ui setting -port "${port}" >/dev/null 2>&1
-    ${xui_folder}/x-ui setting -webBasePath "${webBasePath}" >/dev/null 2>&1
+    # 设置面板参数。这里曾出过事故：setting 命令静默失败后，安装器仍把
+    # 生成的账密当作已生效打印出来，而面板实际还在用默认 admin/admin，
+    # 裸奔在公网上。所以下面启动服务后会用真实登录请求复核一次。
+    apply_panel_settings() {
+        ${xui_folder}/x-ui setting -username "${username}" >/dev/null 2>&1
+        ${xui_folder}/x-ui setting -password "${password}" >/dev/null 2>&1
+        ${xui_folder}/x-ui setting -port "${port}" >/dev/null 2>&1
+        ${xui_folder}/x-ui setting -webBasePath "${webBasePath}" >/dev/null 2>&1
+    }
+    apply_panel_settings || apply_panel_settings
 
     # 启动服务（强制重启，杀掉残留旧进程）
     start_xui_service
 
     # 等待启动
     sleep 2
+
+    # 用运行中的面板实测一遍安装生成的账密（csrf-token -> login），
+    # 不通过则重试一次设置；仍失败则大声警告，绝不静默。
+    base="http://127.0.0.1:${port}${webBasePath}"
+    verify_panel_login() {
+        local jar tok body
+        jar="$(mktemp)"
+        tok="$(curl -s -m 5 -c "$jar" "${base}csrf-token" | sed -n 's/.*"obj":"\([^"]*\)".*/\1/p')"
+        body="$(curl -s -m 5 -b "$jar" -H "Content-Type: application/json" -H "X-CSRF-Token: ${tok}" \
+            -d "{\"username\":\"${username}\",\"password\":\"${password}\"}" "${base}login")"
+        rm -f "$jar"
+        case "$body" in *'"success":true'*) return 0 ;; *) return 1 ;; esac
+    }
+    if ! verify_panel_login; then
+        apply_panel_settings || true
+        sleep 2
+    fi
+    if ! verify_panel_login; then
+        echo -e "${red}========================================================${plain}"
+        echo -e "${red}  警告: 面板登录验证失败！上面显示的账号密码可能未生效。${plain}"
+        echo -e "${red}  面板可能仍在使用默认账密 admin/admin，请立即登录检查并修改！${plain}"
+        echo -e "${red}  手动重试: x-ui setting -username <用户名> -password <密码>${plain}"
+        echo -e "${red}========================================================${plain}"
+    fi
 
     # 显示安装信息
     echo ""
