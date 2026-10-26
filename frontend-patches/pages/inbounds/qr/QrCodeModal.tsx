@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Collapse, Modal } from 'antd';
 import type { CollapseProps } from 'antd';
+import { HttpUtil } from '@/utils';
 
 import { Protocols } from '@/schemas/primitives';
 import {
@@ -36,6 +37,7 @@ interface QrItem {
   value: string;
   downloadName?: string;
   showQr?: boolean;
+  hint?: string;
 }
 
 export default function QrCodeModal({
@@ -54,6 +56,9 @@ export default function QrCodeModal({
   const [subJsonLink, setSubJsonLink] = useState('');
   const [subClashLink, setSubClashLink] = useState('');
   const [activeKey, setActiveKey] = useState<string[]>([]);
+  // 上游 SubSettings 映射丢弃了 subClashEnable, 打开弹窗时单独拉取;
+  // null 表示未知(拉取中或失败), 未知时保持旧行为照常显示链接
+  const [clashEnabled, setClashEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!open || !dbInbound) return;
@@ -101,12 +106,29 @@ export default function QrCodeModal({
     if (subSettings?.enable && subId) {
       nextSub = (subSettings.subURI || '') + subId;
       nextSubJson = subSettings.subJsonEnable ? (subSettings.subJsonURI || '') + subId : '';
-      nextSubClash = (subSettings.subURI || '').replace(/\/sub\//, '/clash/') + subId;
+      if (clashEnabled !== false) {
+        nextSubClash = (subSettings.subURI || '').replace(/\/sub\//, '/clash/') + subId;
+      }
     }
     setSubLink(nextSub);
     setSubJsonLink(nextSubJson);
     setSubClashLink(nextSubClash);
-  }, [open, dbInbound, client, nodeAddress, subSettings]);
+  }, [open, dbInbound, client, nodeAddress, subSettings, clashEnabled]);
+
+  useEffect(() => {
+    if (!open) {
+      setClashEnabled(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const msg = await HttpUtil.post<{ subClashEnable?: boolean }>(
+        '/panel/api/setting/defaultSettings', undefined, { silent: true },
+      );
+      if (!cancelled) setClashEnabled(msg?.success && msg?.obj ? !!msg.obj.subClashEnable : null);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
 
   const qrItems = useMemo<QrItem[]>(() => {
     const items: QrItem[] = [];
@@ -118,6 +140,14 @@ export default function QrCodeModal({
     }
     if (subClashLink) {
       items.push({ key: 'sub-clash', header: `Clash ${t('subscription.title')}`, value: subClashLink });
+    }
+    if (!subClashLink && clashEnabled === false && subSettings?.enable && client?.subId) {
+      items.push({
+        key: 'sub-clash-disabled',
+        header: `Clash ${t('subscription.title')}`,
+        value: '',
+        hint: 'Clash / Mihomo 订阅未开启。请在 面板设置 → 订阅 中打开「Clash / Mihomo 订阅」开关并保存，然后重新打开本弹窗，此处将显示 Clash 订阅链接与二维码。',
+      });
     }
     links.forEach((link, idx) => {
       items.push({ key: `l${idx}`, header: link.remark || `Link ${idx + 1}`, value: link.link });
@@ -134,13 +164,17 @@ export default function QrCodeModal({
       }
     });
     return items;
-  }, [subLink, subJsonLink, subClashLink, links, wireguardConfigs, wireguardLinks, t]);
+  }, [subLink, subJsonLink, subClashLink, links, wireguardConfigs, wireguardLinks, client?.subId, subSettings?.enable, clashEnabled, t]);
 
   const collapseItems: CollapseProps['items'] = useMemo(
     () => qrItems.map((item) => ({
       key: item.key,
       label: item.header,
-      children: (
+      children: item.hint ? (
+        <div style={{ padding: '18px 12px', textAlign: 'center', opacity: 0.65, lineHeight: 1.7 }}>
+          {item.hint}
+        </div>
+      ) : (
         <QrPanel
           value={item.value}
           remark={item.header}

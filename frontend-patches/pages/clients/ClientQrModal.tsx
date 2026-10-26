@@ -65,6 +65,9 @@ export default function ClientQrModal({
   const { t } = useTranslation();
   const [links, setLinks] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  // 上游 useClients 的 SubSettings 映射丢弃了 subClashEnable, 打开弹窗时单独拉取;
+  // null 表示未知(拉取中或失败), 未知时保持旧行为照常显示链接
+  const [clashEnabled, setClashEnabled] = useState<boolean | null>(null);
 
   const subLink = useMemo(() => {
     if (!client?.subId || !subSettings?.enable || !subSettings?.subURI) return '';
@@ -79,8 +82,11 @@ export default function ClientQrModal({
 
   const subClashLink = useMemo(() => {
     if (!client?.subId || !subSettings?.enable || !subSettings?.subURI) return '';
+    if (clashEnabled === false) return '';
     return subSettings.subURI.replace(/\/sub\//, '/clash/') + client.subId;
-  }, [client?.subId, subSettings?.enable, subSettings?.subURI]);
+  }, [client?.subId, subSettings?.enable, subSettings?.subURI, clashEnabled]);
+
+  const showClashHint = !!client?.subId && !!subSettings?.enable && clashEnabled === false;
 
   const wgInbound = useMemo(() => findWireguardInbound(client, inboundsById), [client, inboundsById]);
   const wgConfigText = useMemo(() => {
@@ -88,7 +94,22 @@ export default function ClientQrModal({
     return buildWireguardClientConfig(client, wgInbound, window.location.hostname, subSettings?.publicHost ?? '');
   }, [client, wgInbound, subSettings?.publicHost]);
 
-  const hasAnything = !!subLink || !!subJsonLink || !!subClashLink || !!wgConfigText || links.length > 0;
+  const hasAnything = !!subLink || !!subJsonLink || !!subClashLink || !!wgConfigText || links.length > 0 || showClashHint;
+
+  useEffect(() => {
+    if (!open) {
+      setClashEnabled(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const msg = await HttpUtil.post<{ subClashEnable?: boolean }>(
+        '/panel/api/setting/defaultSettings', undefined, { silent: true },
+      );
+      if (!cancelled) setClashEnabled(msg?.success && msg?.obj ? !!msg.obj.subClashEnable : null);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
 
   useEffect(() => {
     if (!open || !client?.subId) {
@@ -208,9 +229,26 @@ export default function ClientQrModal({
         copyText: subClashLink,
       });
     }
+    if (showClashHint) {
+      out.push({
+        key: 'subClashDisabled',
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{`Clash ${t('subscription.title')}`}</span>
+          </div>
+        ),
+        children: (
+          <div style={{ padding: '18px 12px', textAlign: 'center', opacity: 0.65, lineHeight: 1.7 }}>
+            Clash / Mihomo 订阅未开启。请在 面板设置 → 订阅 中打开「Clash / Mihomo 订阅」开关并保存，
+            然后重新打开本弹窗，此处将显示 Clash 订阅链接与二维码。
+          </div>
+        ),
+        copyText: '',
+      });
+    }
 
     return out;
-  }, [subLink, subJsonLink, subClashLink, wgConfigText, links, client?.email, t]);
+  }, [subLink, subJsonLink, subClashLink, wgConfigText, links, client?.email, showClashHint, t]);
 
   // Restore activeKey from localStorage on open; default to first link item
   useEffect(() => {
@@ -235,7 +273,7 @@ export default function ClientQrModal({
     setActiveKey(items.length > 0 ? [items[0].key] : []);
   }, [open, items]);
 
-  const SUB_KEYS = new Set(['sub', 'subJson', 'subClash']);
+  const SUB_KEYS = new Set(['sub', 'subJson', 'subClash', 'subClashDisabled']);
 
   const handleChange = useCallback((keys: string | string[]) => {
     const next = typeof keys === 'string' ? [keys] : (keys as string[]);
